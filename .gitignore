@@ -1,0 +1,29 @@
+# Python
+.venv/
+venv/
+__pycache__/
+*.py[cod]
+
+# Local configuration and secrets
+.env
+.env.*
+!.env.example
+
+# IDE and operating system
+.idea/
+.vscode/
+Thumbs.db
+Desktop.ini
+
+# Frontend dependencies and generated build output
+frontend/node_modules/
+frontend/dist/
+
+# Local database and generated monitoring data
+backend/*.db
+backend/*.db-*
+backend/storage/
+
+# Logs and temporary files
+*.log
+*.tmp
