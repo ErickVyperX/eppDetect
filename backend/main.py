@@ -28,6 +28,7 @@ async def lifespan(app: FastAPI):
     print("[Main] Servidor iniciado en http://127.0.0.1:8000.")
     print("[Main] Motor de detección en espera. El supervisor debe elegir la fuente de video en la interfaz.")
 
+
     yield
 
     # Ciclo de apagado
@@ -69,7 +70,10 @@ if FRONTEND_DIST.exists():
         file_path = FRONTEND_DIST / full_path
         if file_path.is_file():
             return FileResponse(file_path)
-        return FileResponse(FRONTEND_DIST / "index.html")
+        return FileResponse(
+            FRONTEND_DIST / "index.html",
+            headers={"Cache-Control": "no-cache, no-store, must-revalidate"}
+        )
 else:
     @app.get("/")
     def index():
