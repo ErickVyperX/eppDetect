@@ -88,6 +88,20 @@ export default function App() {
         wsConnected={wsConnected} 
       />
 
+      {/* Aviso Prominente de Desconexión de Enlace Local */}
+      {!wsConnected && (
+        <div 
+          role="alert" 
+          aria-live="assertive"
+          className="bg-rose-600 border-b border-rose-700 text-white px-4 py-2 text-xs sm:text-sm font-semibold flex items-center justify-center space-x-2 shadow-lg"
+        >
+          <span className="inline-block w-2.5 h-2.5 rounded-full bg-white" />
+          <span>
+            Advertencia: Enlace WebSocket con el servidor local interrumpido. Reconectando… Las alertas en tiempo real están en pausa.
+          </span>
+        </div>
+      )}
+
       <main className="flex-1 pb-12">
         {activeTab === 'monitoring' ? (
           <MonitoringView latestAlert={latestAlert} />
