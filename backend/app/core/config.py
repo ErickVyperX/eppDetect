@@ -30,12 +30,12 @@ class Settings:
     DATABASE_URL: str = f"sqlite:///{DB_PATH.as_posix()}"
     
     # YOLO & Tracking (ubicado en D:\PROYECTO-YOLO\PPE_PROYECTO-1\eppDetect\weights_yolov26s_v1.pt)
-    MODEL_PATH: str = str(PROJECT_ROOT / "weights_yolov26s_v1.pt")
+    MODEL_PATH: str = str(PROJECT_ROOT / "weights_yolov26s_v1.2.pt")
     
     # Regla de Negocio: Cooldown de 60 segundos por trabajador/infracción
     INCIDENT_COOLDOWN_SECONDS: float = 60.0
     
     # Confidence threshold
-    CONF_THRESHOLD: float = 0.25
+    CONF_THRESHOLD: float = 0.50
 
 settings = Settings()
