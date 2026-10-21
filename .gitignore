@@ -18,6 +18,7 @@ Desktop.ini
 # Frontend dependencies and generated build output
 frontend/node_modules/
 frontend/dist/
+.agents/
 
 # Local database and generated monitoring data
 backend/*.db
@@ -27,3 +28,7 @@ backend/storage/
 # Logs and temporary files
 *.log
 *.tmp
+
+#exclude .pt files
+*.pt
+skills-lock.json
