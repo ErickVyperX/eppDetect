@@ -10,7 +10,7 @@ sys.path.insert(0, str(BASE_BACKEND_DIR))
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, JSONResponse
 
 from app.core.config import settings
 from app.services.video_engine import video_engine
@@ -76,6 +76,10 @@ if FRONTEND_DIST.exists():
 
     @app.get("/{full_path:path}")
     async def serve_spa(full_path: str):
+        # Fallback SPA vs API/WS 404 (#401)
+        if full_path.startswith("api/") or full_path.startswith("ws/") or full_path == "api" or full_path == "ws":
+            return JSONResponse(status_code=404, content={"detail": "Endpoint not found"})
+
         base_dist = FRONTEND_DIST.resolve()
         requested_file = (base_dist / full_path).resolve()
 

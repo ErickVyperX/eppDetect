@@ -66,6 +66,11 @@ class CooldownManager:
             # Sigue dentro de la ventana de 60 segundos: tracking continuo y silencioso
             return False
 
+    def reset(self):
+        """Reinicia el historial de tracks en memoria bajo lock de forma segura."""
+        with self._lock:
+            self._tracks.clear()
+
     def get_track_status(self, track_id: int, violation_type: str, current_time: Optional[float] = None) -> Optional[dict]:
         """Retorna el estado de seguimiento del sujeto y segundos restantes de cooldown"""
         if current_time is None:
@@ -94,5 +99,12 @@ class CooldownManager:
         ]
         for k in keys_to_remove:
             del self._tracks[k]
+
+    def clean_old_tracks(self, current_time: Optional[float] = None, max_idle: float = 180.0):
+        """Método público para descartar tracks inactivos bajo lock."""
+        if current_time is None:
+            current_time = time.time()
+        with self._lock:
+            self._cleanup_stale_tracks_unlocked(current_time, max_idle=max_idle)
 
 cooldown_manager = CooldownManager()
