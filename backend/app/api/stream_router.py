@@ -36,6 +36,7 @@ def generate_frames():
 @router.get("/video_feed")
 def video_feed(
     token: Optional[str] = Query(None),
+    stream_id: Optional[str] = Query(None),
     authorization: Optional[str] = Header(None),
     db: Session = Depends(get_db)
 ):
@@ -60,7 +61,12 @@ def video_feed(
 
     return StreamingResponse(
         generate_frames(),
-        media_type="multipart/x-mixed-replace; boundary=frame"
+        media_type="multipart/x-mixed-replace; boundary=frame",
+        headers={
+            "Cache-Control": "no-cache, no-store, must-revalidate, max-age=0",
+            "Pragma": "no-cache",
+            "Expires": "0"
+        }
     )
 
 @router.get("/cameras")

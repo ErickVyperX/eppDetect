@@ -1,19 +1,14 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect } from 'react';
 import { api } from '../services/api';
-import { useAuth } from '../context/AuthContext';
 import { 
   BarChart3, 
   TrendingUp, 
   ShieldAlert, 
   Calendar, 
-  Filter, 
   Download, 
-  Search, 
-  HardHat, 
   Eye, 
   Clock,
-  Layers,
-  X
+  Layers
 } from 'lucide-react';
 import { 
   BarChart, 
@@ -27,49 +22,31 @@ import {
   CartesianGrid, 
   Cell 
 } from 'recharts';
+import { formatViolationName, formatDateTime } from '../utils/formatters';
+import EvidenceModal from '../components/EvidenceModal';
+import DatePicker from '../components/DatePicker';
+import Select from '../components/Select';
 
-export default function MetricsView() {
-  const { token } = useAuth();
+const VIOLATION_OPTIONS = [
+  { value: 'all', label: 'Todas las Infracciones', color: 'bg-slate-400' },
+  { value: 'sin_casco', label: 'Sin Casco de Seguridad', color: 'bg-red-500' },
+  { value: 'sin_chaleco', label: 'Sin Chaleco Reflectante', color: 'bg-amber-500' },
+  { value: 'sin_guantes', label: 'Sin Guantes de Protección', color: 'bg-purple-500' },
+];
 
-  const getFrameUrl = (url) => {
-    if (!url) return '';
-    if (!token) return url;
-    const separator = url.includes('?') ? '&' : '?';
-    return `${url}${separator}token=${encodeURIComponent(token)}`;
-  };
-
+export default function MetricsView({ isActive = true }) {
   const [metrics, setMetrics] = useState(null);
   const [incidents, setIncidents] = useState([]);
   const [loading, setLoading] = useState(true);
   const [filterType, setFilterType] = useState('all');
   const [dateFilter, setDateFilter] = useState('');
   const [selectedIncidentModal, setSelectedIncidentModal] = useState(null);
-  const modalCloseBtnRef = useRef(null);
-
-  // Manejo accesible de tecla Escape y foco en modal
-  useEffect(() => {
-    if (!selectedIncidentModal) return;
-
-    const handleKeyDown = (e) => {
-      if (e.key === 'Escape') {
-        setSelectedIncidentModal(null);
-      }
-    };
-
-    window.addEventListener('keydown', handleKeyDown);
-    const timer = setTimeout(() => {
-      modalCloseBtnRef.current?.focus();
-    }, 50);
-
-    return () => {
-      window.removeEventListener('keydown', handleKeyDown);
-      clearTimeout(timer);
-    };
-  }, [selectedIncidentModal]);
 
   useEffect(() => {
-    loadData();
-  }, [filterType, dateFilter]);
+    if (isActive) {
+      loadData();
+    }
+  }, [filterType, dateFilter, isActive]);
 
   const loadData = async () => {
     setLoading(true);
@@ -79,20 +56,11 @@ export default function MetricsView() {
         api.getIncidents({ limit: 100, violation_type: filterType, date_filter: dateFilter })
       ]);
       setMetrics(summary);
-      setIncidents(incList);
+      setIncidents(incList || []);
     } catch (err) {
       console.error("Error al cargar métricas:", err);
     } finally {
       setLoading(false);
-    }
-  };
-
-  const formatViolationName = (type) => {
-    switch (type) {
-      case 'sin_casco': return 'Sin Casco';
-      case 'sin_chaleco': return 'Sin Chaleco';
-      case 'sin_guantes': return 'Sin Guantes';
-      default: return type ? type.replace('_', ' ') : 'N/A';
     }
   };
 
@@ -105,28 +73,41 @@ export default function MetricsView() {
     ];
   };
 
+  /**
+   * Exportación a CSV robusta y compatible con Microsoft Excel:
+   * - Fechas en formato ISO estándar 'YYYY-MM-DD HH:mm:ss' (sin comas que rompan columnas).
+   * - Celdas envueltas en comillas dobles y escape de comillas internas.
+   * - Carácter BOM UTF-8 '\uFEFF' para visualización correcta de caracteres especiales y tildes.
+   */
   const exportToCSV = () => {
     if (incidents.length === 0) return;
     const headers = ['ID', 'Fecha y Hora', 'Sujeto ID', 'Infraccion', 'Confianza', 'Fuente'];
     const rows = incidents.map(i => [
       i.id,
-      new Date(i.timestamp).toLocaleString(),
+      formatDateTime(i.timestamp),
       i.track_id,
       formatViolationName(i.violation_type),
       `${(i.confidence * 100).toFixed(1)}%`,
       i.source_name
     ]);
 
-    const csvContent = 'data:text/csv;charset=utf-8,' 
-      + [headers.join(','), ...rows.map(e => e.join(','))].join('\n');
+    const escapeCell = (val) => `"${String(val ?? '').replace(/"/g, '""')}"`;
 
-    const encodedUri = encodeURI(csvContent);
+    const csvLines = [
+      headers.map(escapeCell).join(','),
+      ...rows.map(row => row.map(escapeCell).join(','))
+    ];
+
+    const csvContent = '\uFEFF' + csvLines.join('\r\n');
+    const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+    const url = URL.createObjectURL(blob);
     const link = document.createElement('a');
-    link.setAttribute('href', encodedUri);
+    link.setAttribute('href', url);
     link.setAttribute('download', `reporte_epp_incidencias_${new Date().toISOString().slice(0, 10)}.csv`);
     document.body.appendChild(link);
     link.click();
     document.body.removeChild(link);
+    URL.revokeObjectURL(url);
   };
 
   return (
@@ -136,19 +117,21 @@ export default function MetricsView() {
       <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
         <div>
           <h2 className="text-2xl font-bold text-white tracking-tight flex items-center space-x-2">
-            <BarChart3 className="w-6 h-6 text-orange-400" />
+            <BarChart3 className="w-6 h-6 text-orange-400" aria-hidden="true" />
             <span>Métricas e Inteligencia de Seguridad</span>
           </h2>
-          <p className="text-xs text-slate-400 mt-1">
+          <p className="text-xs text-slate-300 mt-1">
             Análisis estadístico de cumplimiento y registro histórico de omisiones de EPP.
           </p>
         </div>
 
         <button
+          type="button"
           onClick={exportToCSV}
-          className="flex items-center space-x-2 px-4 py-2 bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 rounded-xl text-xs font-semibold shadow transition-colors"
+          className="flex items-center space-x-2 px-4 py-2 bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 rounded-xl text-xs font-semibold shadow focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-orange-500 transition-colors"
+          aria-label="Exportar reporte de incidencias en formato CSV"
         >
-          <Download className="w-4 h-4 text-orange-400" />
+          <Download className="w-4 h-4 text-orange-400" aria-hidden="true" />
           <span>Exportar Reporte CSV</span>
         </button>
       </div>
@@ -157,25 +140,25 @@ export default function MetricsView() {
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
         
         <div className="bg-slate-900 border border-slate-800 rounded-2xl p-5 shadow">
-          <div className="flex items-center justify-between text-slate-400">
+          <div className="flex items-center justify-between text-slate-300">
             <span className="text-xs font-medium">Infracciones Hoy</span>
             <div className="p-2 bg-orange-500/10 text-orange-400 rounded-xl">
-              <Calendar className="w-4 h-4" />
+              <Calendar className="w-4 h-4" aria-hidden="true" />
             </div>
           </div>
           <div className="text-3xl font-extrabold text-white mt-2">
             {metrics?.today_incidents ?? 0}
           </div>
           <div className="text-[11px] text-slate-400 mt-1">
-            Registradas durante el turno actual
+            Registradas en el día calendario actual
           </div>
         </div>
 
         <div className="bg-slate-900 border border-slate-800 rounded-2xl p-5 shadow">
-          <div className="flex items-center justify-between text-slate-400">
+          <div className="flex items-center justify-between text-slate-300">
             <span className="text-xs font-medium">Total Histórico</span>
             <div className="p-2 bg-blue-500/10 text-blue-400 rounded-xl">
-              <Layers className="w-4 h-4" />
+              <Layers className="w-4 h-4" aria-hidden="true" />
             </div>
           </div>
           <div className="text-3xl font-extrabold text-white mt-2">
@@ -187,10 +170,10 @@ export default function MetricsView() {
         </div>
 
         <div className="bg-slate-900 border border-slate-800 rounded-2xl p-5 shadow">
-          <div className="flex items-center justify-between text-slate-400">
+          <div className="flex items-center justify-between text-slate-300">
             <span className="text-xs font-medium">Mayor Omisión de EPP</span>
             <div className="p-2 bg-rose-500/10 text-rose-400 rounded-xl">
-              <ShieldAlert className="w-4 h-4" />
+              <ShieldAlert className="w-4 h-4" aria-hidden="true" />
             </div>
           </div>
           <div className="text-xl font-bold text-rose-400 mt-2 truncate">
@@ -202,10 +185,10 @@ export default function MetricsView() {
         </div>
 
         <div className="bg-slate-900 border border-slate-800 rounded-2xl p-5 shadow">
-          <div className="flex items-center justify-between text-slate-400">
+          <div className="flex items-center justify-between text-slate-300">
             <span className="text-xs font-medium">Ventana de Cooldown</span>
             <div className="p-2 bg-emerald-500/10 text-emerald-400 rounded-xl">
-              <Clock className="w-4 h-4" />
+              <Clock className="w-4 h-4" aria-hidden="true" />
             </div>
           </div>
           <div className="text-3xl font-extrabold text-emerald-400 mt-2">
@@ -218,21 +201,37 @@ export default function MetricsView() {
 
       </div>
 
-      {/* GRÁFICOS ANALÍTICOS */}
+      {/* GRÁFICOS ANALÍTICOS ACCESIBLES */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
         
         {/* Gráfico 1: Infracciones por Tipo de EPP */}
-        <div className="bg-slate-900 border border-slate-800 rounded-2xl p-5 shadow space-y-4">
+        <div 
+          role="region" 
+          aria-label="Gráfico de distribución por tipo de EPP" 
+          tabIndex={0}
+          className="bg-slate-900 border border-slate-800 rounded-2xl p-5 shadow space-y-4 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-slate-700"
+        >
           <h3 className="text-sm font-bold text-white flex items-center space-x-2">
-            <ShieldAlert className="w-4 h-4 text-orange-400" />
+            <ShieldAlert className="w-4 h-4 text-orange-400" aria-hidden="true" />
             <span>Distribución por Tipo de EPP Omitido</span>
           </h3>
-          <div className="h-64">
+
+          {/* Resumen semántico para tecnologías asistivas */}
+          <div className="sr-only">
+            <p>Distribución de omisiones de equipo de protección personal:</p>
+            <ul>
+              <li>Sin Casco de Seguridad: {metrics?.violations_by_type?.sin_casco || 0} incidencias</li>
+              <li>Sin Chaleco Reflectante: {metrics?.violations_by_type?.sin_chaleco || 0} incidencias</li>
+              <li>Sin Guantes de Protección: {metrics?.violations_by_type?.sin_guantes || 0} incidencias</li>
+            </ul>
+          </div>
+
+          <div className="h-64" aria-hidden="true">
             <ResponsiveContainer width="100%" height="100%">
               <BarChart data={getChartData()} margin={{ top: 20, right: 20, left: -20, bottom: 5 }}>
                 <CartesianGrid strokeDasharray="3 3" stroke="#1e293b" />
-                <XAxis dataKey="name" stroke="#64748b" fontSize={11} />
-                <YAxis stroke="#64748b" fontSize={11} allowDecimals={false} />
+                <XAxis dataKey="name" stroke="#94a3b8" fontSize={11} />
+                <YAxis stroke="#94a3b8" fontSize={11} allowDecimals={false} />
                 <Tooltip 
                   contentStyle={{ backgroundColor: '#0f172a', borderColor: '#334155', borderRadius: '8px', fontSize: '12px' }}
                   labelStyle={{ color: '#cbd5e1' }}
@@ -248,12 +247,23 @@ export default function MetricsView() {
         </div>
 
         {/* Gráfico 2: Distribución por Horas del Turno */}
-        <div className="bg-slate-900 border border-slate-800 rounded-2xl p-5 shadow space-y-4">
+        <div 
+          role="region" 
+          aria-label="Gráfico de frecuencia horaria de incidencias" 
+          tabIndex={0}
+          className="bg-slate-900 border border-slate-800 rounded-2xl p-5 shadow space-y-4 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-slate-700"
+        >
           <h3 className="text-sm font-bold text-white flex items-center space-x-2">
-            <TrendingUp className="w-4 h-4 text-blue-400" />
+            <TrendingUp className="w-4 h-4 text-blue-400" aria-hidden="true" />
             <span>Frecuencia Horaria de Incidencias (24h)</span>
           </h3>
-          <div className="h-64">
+
+          {/* Resumen semántico para tecnologías asistivas */}
+          <div className="sr-only">
+            <p>Frecuencia de incidencias detectadas en cada hora del día de monitoreo.</p>
+          </div>
+
+          <div className="h-64" aria-hidden="true">
             <ResponsiveContainer width="100%" height="100%">
               <AreaChart data={metrics?.hourly_distribution || []} margin={{ top: 20, right: 20, left: -20, bottom: 5 }}>
                 <defs>
@@ -263,8 +273,8 @@ export default function MetricsView() {
                   </linearGradient>
                 </defs>
                 <CartesianGrid strokeDasharray="3 3" stroke="#1e293b" />
-                <XAxis dataKey="hora" stroke="#64748b" fontSize={10} interval={3} />
-                <YAxis stroke="#64748b" fontSize={11} allowDecimals={false} />
+                <XAxis dataKey="hora" stroke="#94a3b8" fontSize={10} interval={3} />
+                <YAxis stroke="#94a3b8" fontSize={11} allowDecimals={false} />
                 <Tooltip 
                   contentStyle={{ backgroundColor: '#0f172a', borderColor: '#334155', borderRadius: '8px', fontSize: '12px' }}
                   labelStyle={{ color: '#cbd5e1' }}
@@ -282,73 +292,56 @@ export default function MetricsView() {
         
         <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-3">
           <h3 className="text-sm font-bold text-white flex items-center space-x-2">
-            <Clock className="w-4 h-4 text-orange-400" />
+            <Clock className="w-4 h-4 text-orange-400" aria-hidden="true" />
             <span>Historial Detallado de Incidencias</span>
           </h3>
 
           {/* Filtros */}
           <div className="flex flex-wrap items-center gap-3 w-full md:w-auto">
-            {/* Filtro por Tipo */}
-            <div className="flex items-center space-x-2 bg-slate-950 px-3 py-1.5 rounded-xl border border-slate-700 text-xs">
-              <Filter className="w-3.5 h-3.5 text-slate-400" />
-              <select
-                value={filterType}
-                onChange={(e) => setFilterType(e.target.value)}
-                className="bg-transparent text-white focus:outline-none text-xs"
-              >
-                <option value="all">Todas las Infracciones</option>
-                <option value="sin_casco">Sin Casco</option>
-                <option value="sin_chaleco">Sin Chaleco</option>
-                <option value="sin_guantes">Sin Guantes</option>
-              </select>
-            </div>
+            {/* Filtro por Tipo de Infracción con Select interactivo */}
+            <Select
+              value={filterType}
+              onChange={setFilterType}
+              options={VIOLATION_OPTIONS}
+              ariaLabel="Filtrar incidencias por tipo de infracción"
+            />
 
-            {/* Filtro por Fecha */}
-            <div className="flex items-center space-x-2 bg-slate-950 px-3 py-1.5 rounded-xl border border-slate-700 text-xs">
-              <Calendar className="w-3.5 h-3.5 text-slate-400" />
-              <input
-                type="date"
-                value={dateFilter}
-                onChange={(e) => setDateFilter(e.target.value)}
-                className="bg-transparent text-white focus:outline-none text-xs"
-              />
-              {dateFilter && (
-                <button 
-                  onClick={() => setDateFilter('')}
-                  className="text-slate-400 hover:text-white text-[10px]"
-                >
-                  &times;
-                </button>
-              )}
-            </div>
+            {/* Filtro por Fecha con DatePicker interactivo */}
+            <DatePicker
+              value={dateFilter}
+              onChange={setDateFilter}
+              placeholder="Todas las fechas"
+              ariaLabel="Filtrar incidencias por fecha"
+            />
           </div>
         </div>
 
         {/* Tabla */}
         <div className="overflow-x-auto">
           <table className="w-full text-left text-xs text-slate-300">
-            <thead className="text-[11px] uppercase tracking-wider bg-slate-950/70 text-slate-400 border-b border-slate-800">
+            <caption className="sr-only">Historial de infracciones de seguridad detectadas</caption>
+            <thead className="text-[11px] uppercase tracking-wider bg-slate-950/70 text-slate-300 border-b border-slate-800">
               <tr>
-                <th className="py-3 px-4">Fecha y Hora</th>
-                <th className="py-3 px-4">Sujeto / Track</th>
-                <th className="py-3 px-4">Infracción Detectada</th>
-                <th className="py-3 px-4">Confianza</th>
-                <th className="py-3 px-4">Fuente</th>
-                <th className="py-3 px-4 text-center">Evidencia</th>
+                <th scope="col" className="py-3 px-4">Fecha y Hora</th>
+                <th scope="col" className="py-3 px-4">Sujeto / Track</th>
+                <th scope="col" className="py-3 px-4">Infracción Detectada</th>
+                <th scope="col" className="py-3 px-4">Confianza</th>
+                <th scope="col" className="py-3 px-4">Fuente</th>
+                <th scope="col" className="py-3 px-4 text-center">Evidencia</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-800/60">
               {incidents.length === 0 ? (
                 <tr>
-                  <td colSpan={6} className="py-8 text-center text-slate-500 text-xs">
-                    No se encontraron incidencias registradas con los filtros seleccionados.
+                  <td colSpan={6} className="py-8 text-center text-slate-400 text-xs">
+                    {loading ? 'Cargando incidencias registradas...' : 'No se encontraron incidencias registradas con los filtros seleccionados.'}
                   </td>
                 </tr>
               ) : (
                 incidents.map((inc) => (
                   <tr key={inc.id} className="hover:bg-slate-800/40 transition-colors">
                     <td className="py-3 px-4 font-mono text-[11px] text-slate-300">
-                      {new Date(inc.timestamp).toLocaleString()}
+                      {formatDateTime(inc.timestamp)}
                     </td>
                     <td className="py-3 px-4 font-semibold text-white">
                       #{inc.track_id}
@@ -361,15 +354,17 @@ export default function MetricsView() {
                     <td className="py-3 px-4 font-mono">
                       {(inc.confidence * 100).toFixed(0)}%
                     </td>
-                    <td className="py-3 px-4 text-slate-400 text-[11px]">
+                    <td className="py-3 px-4 text-slate-300 text-[11px]">
                       {inc.source_name}
                     </td>
                     <td className="py-3 px-4 text-center">
                       <button
+                        type="button"
                         onClick={() => setSelectedIncidentModal(inc)}
-                        className="inline-flex items-center space-x-1 px-2.5 py-1 rounded-lg bg-slate-800 hover:bg-orange-500 text-slate-300 hover:text-white transition-all text-[11px]"
+                        aria-label={`Ver foto de evidencia para incidencia ${inc.id} de ${formatViolationName(inc.violation_type)}`}
+                        className="inline-flex items-center space-x-1 px-2.5 py-1 rounded-lg bg-slate-800 hover:bg-orange-500 text-slate-300 hover:text-white focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-orange-500 transition-all text-[11px]"
                       >
-                        <Eye className="w-3.5 h-3.5" />
+                        <Eye className="w-3.5 h-3.5" aria-hidden="true" />
                         <span>Ver Foto</span>
                       </button>
                     </td>
@@ -382,58 +377,11 @@ export default function MetricsView() {
 
       </div>
 
-      {/* MODAL DE EVIDENCIA */}
-      {selectedIncidentModal && (
-        <div 
-          onClick={() => setSelectedIncidentModal(null)}
-          role="dialog"
-          aria-modal="true"
-          aria-labelledby="metrics-evidence-title"
-          aria-describedby="metrics-evidence-desc"
-          className="fixed inset-0 z-50 bg-black/85 backdrop-blur-sm flex items-center justify-center p-4 animate-in fade-in duration-150"
-        >
-          <div 
-            onClick={(e) => e.stopPropagation()}
-            className="bg-slate-900 border border-slate-800 rounded-2xl max-w-3xl w-full p-6 space-y-4 shadow-2xl"
-          >
-            <div className="flex items-center justify-between border-b border-slate-800 pb-3 gap-3">
-              <div>
-                <h3 id="metrics-evidence-title" className="text-base font-bold text-white flex items-center space-x-2">
-                  <ShieldAlert className="w-5 h-5 text-rose-400 flex-shrink-0" aria-hidden="true" />
-                  <span>Registro de Evidencia: {formatViolationName(selectedIncidentModal.violation_type)}</span>
-                </h3>
-                <p id="metrics-evidence-desc" className="text-xs text-slate-300 mt-0.5">
-                  ID: <span className="font-mono text-slate-400">{selectedIncidentModal.id}</span> &bull; Sujeto <strong className="text-white">#{selectedIncidentModal.track_id}</strong> &bull; <time className="font-mono">{new Date(selectedIncidentModal.timestamp).toLocaleString()}</time>
-                </p>
-              </div>
-              <button
-                ref={modalCloseBtnRef}
-                type="button"
-                onClick={() => setSelectedIncidentModal(null)}
-                aria-label="Cerrar visor de evidencia (presione Escape)"
-                className="inline-flex items-center space-x-1.5 px-3 py-1.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-200 hover:text-white border border-slate-700 text-xs font-semibold focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-orange-500 transition-colors flex-shrink-0"
-              >
-                <X className="w-4 h-4" aria-hidden="true" />
-                <span>Cerrar</span>
-                <kbd className="hidden sm:inline-block ml-1 text-[10px] font-mono text-slate-400 bg-slate-950 px-1.5 py-0.5 rounded border border-slate-700">ESC</kbd>
-              </button>
-            </div>
-
-            <div className="bg-black rounded-xl overflow-hidden border border-slate-800 max-h-[480px] flex items-center justify-center">
-              <img
-                src={getFrameUrl(selectedIncidentModal.frame_url)}
-                alt={`Evidencia de ${formatViolationName(selectedIncidentModal.violation_type)} en trabajador #${selectedIncidentModal.track_id}`}
-                className="max-h-[480px] w-auto object-contain"
-              />
-            </div>
-
-            <div className="flex justify-between items-center text-xs text-slate-300 pt-2 border-t border-slate-800/80">
-              <span>Nivel de Confianza: <strong className="text-white font-mono tabular-nums">{(selectedIncidentModal.confidence * 100).toFixed(1)}%</strong></span>
-              <span className="text-slate-400">Almacenado localmente &bull; SQLite On-Premise</span>
-            </div>
-          </div>
-        </div>
-      )}
+      {/* MODAL DE EVIDENCIA REUTILIZABLE Y ACCESIBLE */}
+      <EvidenceModal
+        incident={selectedIncidentModal}
+        onClose={() => setSelectedIncidentModal(null)}
+      />
 
     </div>
   );

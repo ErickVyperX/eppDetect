@@ -1,5 +1,6 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { useAuth } from './context/AuthContext';
+import { soundService } from './services/sound';
 import LoginView from './views/LoginView';
 import MonitoringView from './views/MonitoringView';
 import MetricsView from './views/MetricsView';
@@ -9,7 +10,9 @@ export default function App() {
   const { user, loading } = useAuth();
   const [activeTab, setActiveTab] = useState('monitoring');
   const [wsConnected, setWsConnected] = useState(false);
-  const [latestAlert, setLatestAlert] = useState(null);
+  
+  // Cola global de alertas para soportar ráfagas concurrentes sin pérdida
+  const [alertQueue, setAlertQueue] = useState([]);
   const wsRef = useRef(null);
 
   // Conexión persistente con WebSockets para recepción de alertas (Protegida con Token y Origin)
@@ -49,8 +52,18 @@ export default function App() {
       socket.onmessage = (event) => {
         try {
           const payload = JSON.parse(event.data);
-          if (payload.type === 'new_incident') {
-            setLatestAlert(payload);
+          if (payload.type === 'new_incident' && payload.incident) {
+            // Reproducir alarma sonora inmediatamente a nivel global en App.jsx
+            // Sonará incluso si el usuario se encuentra en la pestaña de Métricas
+            soundService.playIncidentAlert();
+
+            const incidentWithMetadata = {
+              ...payload.incident,
+              _receivedAt: Date.now()
+            };
+
+            // Encolar alerta para evitar pérdidas por ráfagas concurrentes
+            setAlertQueue(prev => [...prev, incidentWithMetadata]);
           }
         } catch (e) {
           // mensaje de texto plano como pong
@@ -76,10 +89,24 @@ export default function App() {
     return () => {
       isDisposed = true;
       if (reconnectTimeout) clearTimeout(reconnectTimeout);
-      if (socket) socket.close();
       if (pingInterval) clearInterval(pingInterval);
+      if (socket) {
+        // Desasociar listeners para prevenir reconexiones zombi en el desmontaje
+        socket.onclose = null;
+        socket.onerror = null;
+        socket.onmessage = null;
+        socket.close();
+      }
     };
   }, [user]);
+
+  // Consumir alertas procesadas por las vistas
+  const handleConsumeAlerts = useCallback((consumedIds = null) => {
+    setAlertQueue(prev => {
+      if (!consumedIds) return [];
+      return prev.filter(item => !consumedIds.includes(item.id));
+    });
+  }, []);
 
   if (loading) {
     return (
@@ -109,7 +136,7 @@ export default function App() {
           aria-live="assertive"
           className="bg-rose-600 border-b border-rose-700 text-white px-4 py-2 text-xs sm:text-sm font-semibold flex items-center justify-center space-x-2 shadow-lg"
         >
-          <span className="inline-block w-2.5 h-2.5 rounded-full bg-white" />
+          <span className="inline-block w-2.5 h-2.5 rounded-full bg-white" aria-hidden="true" />
           <span>
             Advertencia: Enlace WebSocket con el servidor local interrumpido. Reconectando… Las alertas en tiempo real están en pausa.
           </span>
@@ -117,11 +144,17 @@ export default function App() {
       )}
 
       <main className="flex-1 pb-12">
-        {activeTab === 'monitoring' ? (
-          <MonitoringView latestAlert={latestAlert} />
-        ) : (
-          <MetricsView />
-        )}
+        <div className={activeTab === 'monitoring' ? 'block' : 'hidden'}>
+          <MonitoringView 
+            alertQueue={alertQueue}
+            onConsumeAlerts={handleConsumeAlerts}
+            latestAlert={alertQueue.length > 0 ? alertQueue[alertQueue.length - 1] : null}
+            isActive={activeTab === 'monitoring'}
+          />
+        </div>
+        <div className={activeTab === 'metrics' ? 'block' : 'hidden'}>
+          <MetricsView isActive={activeTab === 'metrics'} />
+        </div>
       </main>
     </div>
   );

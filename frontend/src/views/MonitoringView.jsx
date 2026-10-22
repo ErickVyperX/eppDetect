@@ -1,6 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { api } from '../services/api';
-import { soundService } from '../services/sound';
 import { useAuth } from '../context/AuthContext';
 import { 
   Camera, 
@@ -12,18 +11,15 @@ import {
   ShieldAlert, 
   ShieldCheck, 
   Clock, 
-  Activity, 
-  UserCheck, 
-  Flame, 
   Upload, 
   CheckCircle2, 
-  AlertCircle,
-  X,
   Maximize2,
   Minimize2
 } from 'lucide-react';
+import { formatViolationName, formatTime } from '../utils/formatters';
+import EvidenceModal from '../components/EvidenceModal';
 
-export default function MonitoringView({ latestAlert }) {
+export default function MonitoringView({ alertQueue = [], onConsumeAlerts, latestAlert, isActive = true }) {
   const { token } = useAuth();
 
   const getFrameUrl = (url) => {
@@ -77,34 +73,41 @@ export default function MonitoringView({ latestAlert }) {
     active_tracks: 0 
   });
   const [actionLoading, setActionLoading] = useState(false);
+  const [streamSessionId, setStreamSessionId] = useState(Date.now());
+  const reconnectTimeoutRef = useRef(null);
+
+  // Reconectar limpiamente con una nueva sesión si la pestaña se vuelve a activar y el stream está en curso
+  useEffect(() => {
+    if (isActive && status.is_running) {
+      setStreamSessionId(Date.now());
+    }
+  }, [isActive]);
+
+  // Limpiar timer de reconexión al desmontar
+  useEffect(() => {
+    return () => {
+      if (reconnectTimeoutRef.current) {
+        clearTimeout(reconnectTimeoutRef.current);
+      }
+    };
+  }, []);
+
+  // Manejador de error para auto-reconexión del stream MJPEG tras 1.5 segundos
+  const handleImageError = () => {
+    if (isActive && status.is_running) {
+      if (reconnectTimeoutRef.current) {
+        clearTimeout(reconnectTimeoutRef.current);
+      }
+      reconnectTimeoutRef.current = setTimeout(() => {
+        setStreamSessionId(Date.now());
+      }, 1500);
+    }
+  };
 
   // Incidencias y alertas en vivo
   const [liveIncidents, setLiveIncidents] = useState([]);
   const [activeBannerAlert, setActiveBannerAlert] = useState(null);
   const [selectedIncidentModal, setSelectedIncidentModal] = useState(null);
-  const modalCloseBtnRef = useRef(null);
-
-  // Manejo accesible de tecla Escape y foco en modal
-  useEffect(() => {
-    if (!selectedIncidentModal) return;
-
-    const handleKeyDown = (e) => {
-      if (e.key === 'Escape') {
-        setSelectedIncidentModal(null);
-      }
-    };
-
-    window.addEventListener('keydown', handleKeyDown);
-    // Autofoco inmediato en botón cerrar
-    const timer = setTimeout(() => {
-      modalCloseBtnRef.current?.focus();
-    }, 50);
-
-    return () => {
-      window.removeEventListener('keydown', handleKeyDown);
-      clearTimeout(timer);
-    };
-  }, [selectedIncidentModal]);
 
   // Carga inicial de cámaras y estado
   useEffect(() => {
@@ -116,26 +119,55 @@ export default function MonitoringView({ latestAlert }) {
     return () => clearInterval(interval);
   }, []);
 
-  // Escuchar alertas en tiempo real vía WebSocket
+  // Escuchar y procesar alertas en tiempo real sin duplicar IDs ni re-disparar sonido
+  // La alarma sonora se reproduce exclusivamente a nivel global en App.jsx
   useEffect(() => {
-    if (latestAlert && latestAlert.type === 'new_incident') {
+    if (alertQueue && alertQueue.length > 0) {
+      const pendingAlerts = [...alertQueue];
+
+      // Notificar consumo de alertas al padre para limpiar la cola
+      if (onConsumeAlerts) {
+        onConsumeAlerts(pendingAlerts.map(a => a.id));
+      }
+
+      // Activar banner visual solo para la alerta más reciente si ocurrió hace menos de 10s
+      const now = Date.now();
+      const latestRecent = [...pendingAlerts].reverse().find(inc => (now - (inc._receivedAt || now)) < 10000);
+      if (latestRecent) {
+        setActiveBannerAlert(latestRecent);
+        setTimeout(() => {
+          setActiveBannerAlert(prev => (prev?.id === latestRecent.id ? null : prev));
+        }, 7000);
+      }
+
+      // Prepend a liveIncidents deduplicando por ID para evitar claves duplicadas
+      setLiveIncidents(prev => {
+        const existingIds = new Set(prev.map(item => item.id));
+        const uniqueNew = pendingAlerts.filter(item => !existingIds.has(item.id));
+        return [...uniqueNew, ...prev].slice(0, 30);
+      });
+    } else if (latestAlert && latestAlert.type === 'new_incident') {
+      // Compatibilidad con latestAlert individual
       const inc = latestAlert.incident;
-      soundService.playIncidentAlert();
+      if (inc) {
+        setActiveBannerAlert(inc);
+        setTimeout(() => {
+          setActiveBannerAlert(prev => (prev?.id === inc.id ? null : prev));
+        }, 7000);
 
-      setActiveBannerAlert(inc);
-      setTimeout(() => {
-        setActiveBannerAlert(prev => (prev?.id === inc.id ? null : prev));
-      }, 7000);
-
-      setLiveIncidents(prev => [inc, ...prev.slice(0, 29)]);
+        setLiveIncidents(prev => {
+          if (prev.some(item => item.id === inc.id)) return prev;
+          return [inc, ...prev.slice(0, 29)];
+        });
+      }
     }
-  }, [latestAlert]);
+  }, [alertQueue, latestAlert, onConsumeAlerts]);
 
   const loadCameras = async () => {
     try {
       const list = await api.getCameras();
-      setCameras(list);
-      if (list.length > 0) {
+      setCameras(list || []);
+      if (list && list.length > 0) {
         setSelectedCameraIndex(list[0].index);
       }
     } catch (e) {
@@ -146,7 +178,7 @@ export default function MonitoringView({ latestAlert }) {
   const checkStatus = async () => {
     try {
       const s = await api.getStreamStatus();
-      setStatus(s);
+      if (s) setStatus(s);
     } catch (e) {
       // Ignorar errores temporales
     }
@@ -155,7 +187,7 @@ export default function MonitoringView({ latestAlert }) {
   const loadRecentIncidents = async () => {
     try {
       const data = await api.getIncidents({ limit: 15 });
-      setLiveIncidents(data);
+      setLiveIncidents(data || []);
     } catch (e) {
       console.error("Error al cargar incidencias:", e);
     }
@@ -205,6 +237,7 @@ export default function MonitoringView({ latestAlert }) {
           name: selectedFile?.name || 'Video Local'
         });
       }
+      setStreamSessionId(Date.now());
       await checkStatus();
     } catch (err) {
       alert("Error al iniciar monitoreo: " + err.message);
@@ -218,6 +251,7 @@ export default function MonitoringView({ latestAlert }) {
     setActionLoading(true);
     try {
       await api.stopStream();
+      setStreamSessionId(Date.now());
       await checkStatus();
     } catch (err) {
       alert("Error al detener monitoreo: " + err.message);
@@ -226,24 +260,19 @@ export default function MonitoringView({ latestAlert }) {
     }
   };
 
-  const formatViolationName = (type) => {
-    switch (type) {
-      case 'sin_casco': return 'Sin Casco de Seguridad';
-      case 'sin_chaleco': return 'Sin Chaleco Reflectante';
-      case 'sin_guantes': return 'Sin Guantes de Protección';
-      default: return type ? type.replace('_', ' ') : 'Infracción';
-    }
-  };
-
   return (
     <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-6 space-y-6">
       
-      {/* BANNER VISUAL DE ALERTA EN TIEMPO REAL */}
+      {/* BANNER VISUAL DE ALERTA EN TIEMPO REAL CON ROL ACCESIBLE */}
       {activeBannerAlert && (
-        <div className="bg-rose-500/20 border-2 border-rose-500 rounded-2xl p-4 text-white shadow-2xl animate-alert-pulse flex items-center justify-between transition-all">
+        <div 
+          role="alert"
+          aria-live="assertive"
+          className="bg-rose-500/20 border-2 border-rose-500 rounded-2xl p-4 text-white shadow-2xl animate-alert-pulse flex items-center justify-between transition-all"
+        >
           <div className="flex items-center space-x-4">
-            <div className="bg-rose-600 p-3 rounded-xl animate-bounce">
-              <ShieldAlert className="w-8 h-8 text-white" />
+            <div className="bg-rose-600 p-3 rounded-xl motion-safe:animate-bounce">
+              <ShieldAlert className="w-8 h-8 text-white" aria-hidden="true" />
             </div>
             <div>
               <div className="flex items-center space-x-2">
@@ -263,8 +292,9 @@ export default function MonitoringView({ latestAlert }) {
             </div>
           </div>
           <button
+            type="button"
             onClick={() => setSelectedIncidentModal(activeBannerAlert)}
-            className="px-4 py-2 bg-rose-600 hover:bg-rose-700 text-xs font-semibold rounded-xl shadow transition-colors"
+            className="px-4 py-2 bg-rose-600 hover:bg-rose-700 text-xs font-semibold rounded-xl shadow focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white transition-colors"
           >
             Ver Evidencia
           </button>
@@ -277,7 +307,7 @@ export default function MonitoringView({ latestAlert }) {
         <div className="flex flex-col md:flex-row items-start md:items-center justify-between gap-4 pb-4 border-b border-slate-800">
           <div>
             <h3 className="text-base font-bold text-white flex items-center space-x-2">
-              <Video className="w-5 h-5 text-orange-400" />
+              <Video className="w-5 h-5 text-orange-400" aria-hidden="true" />
               <span>Configuración de Entrada de Video</span>
             </h3>
             <p className="text-xs text-slate-400 mt-0.5">
@@ -289,33 +319,44 @@ export default function MonitoringView({ latestAlert }) {
           <div className="flex items-center space-x-3 w-full md:w-auto">
             {!status.is_running ? (
               <button
+                type="button"
                 onClick={handleStart}
                 disabled={actionLoading || (sourceType === 'file' && !uploadedFilePath)}
-                className="flex-1 md:flex-initial flex items-center justify-center space-x-2 px-6 py-2.5 rounded-xl bg-gradient-to-r from-orange-500 to-amber-500 hover:from-orange-600 hover:to-amber-600 text-white font-semibold text-xs shadow-lg shadow-orange-500/25 transition-all disabled:opacity-50 disabled:cursor-not-allowed"
+                className="flex-1 md:flex-initial flex items-center justify-center space-x-2 px-6 py-2.5 rounded-xl bg-gradient-to-r from-orange-500 to-amber-500 hover:from-orange-600 hover:to-amber-600 text-white font-semibold text-xs shadow-lg shadow-orange-500/25 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-orange-500 transition-all disabled:opacity-50 disabled:cursor-not-allowed"
               >
-                <Play className="w-4 h-4 fill-white" />
+                <Play className="w-4 h-4 fill-white" aria-hidden="true" />
                 <span>{actionLoading ? 'Iniciando...' : 'Iniciar Monitoreo'}</span>
               </button>
             ) : (
               <button
+                type="button"
                 onClick={handleStop}
                 disabled={actionLoading}
-                className="flex-1 md:flex-initial flex items-center justify-center space-x-2 px-6 py-2.5 rounded-xl bg-rose-600 hover:bg-rose-700 text-white font-semibold text-xs shadow-lg shadow-rose-600/25 transition-all disabled:opacity-50"
+                className="flex-1 md:flex-initial flex items-center justify-center space-x-2 px-6 py-2.5 rounded-xl bg-rose-600 hover:bg-rose-700 text-white font-semibold text-xs shadow-lg shadow-rose-600/25 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-rose-500 transition-all disabled:opacity-50"
               >
-                <Square className="w-4 h-4 fill-white" />
+                <Square className="w-4 h-4 fill-white" aria-hidden="true" />
                 <span>{actionLoading ? 'Deteniendo...' : 'Detener Monitoreo'}</span>
               </button>
             )}
           </div>
         </div>
 
-        {/* SELECTOR DE MODO: CÁMARA VS ARCHIVO */}
+        {/* SELECTOR DE MODO: CÁMARA VS ARCHIVO ACCESIBLE POR TECLADO */}
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
           
           {/* Opción 1: Cámara Conectada */}
           <div 
+            role="button"
+            tabIndex={0}
             onClick={() => !status.is_running && setSourceType('camera')}
-            className={`p-4 rounded-xl border transition-all cursor-pointer ${
+            onKeyDown={(e) => {
+              if (e.key === 'Enter' || e.key === ' ') {
+                e.preventDefault();
+                if (!status.is_running) setSourceType('camera');
+              }
+            }}
+            aria-label="Seleccionar fuente de cámara web conectada"
+            className={`p-4 rounded-xl border transition-all cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-orange-500 ${
               sourceType === 'camera'
                 ? 'bg-orange-500/10 border-orange-500/50 ring-1 ring-orange-500/30'
                 : 'bg-slate-950/60 border-slate-800 hover:border-slate-700'
@@ -323,7 +364,7 @@ export default function MonitoringView({ latestAlert }) {
           >
             <div className="flex items-center justify-between mb-2">
               <div className="flex items-center space-x-2">
-                <Camera className={`w-4 h-4 ${sourceType === 'camera' ? 'text-orange-400' : 'text-slate-400'}`} />
+                <Camera className={`w-4 h-4 ${sourceType === 'camera' ? 'text-orange-400' : 'text-slate-400'}`} aria-hidden="true" />
                 <span className="text-xs font-bold text-white">Cámaras Conectadas al Equipo</span>
               </div>
               <input
@@ -332,6 +373,7 @@ export default function MonitoringView({ latestAlert }) {
                 checked={sourceType === 'camera'}
                 onChange={() => !status.is_running && setSourceType('camera')}
                 disabled={status.is_running}
+                aria-label="Captura mediante cámara web conectada"
                 className="text-orange-500 focus:ring-orange-500"
               />
             </div>
@@ -341,6 +383,7 @@ export default function MonitoringView({ latestAlert }) {
                 value={selectedCameraIndex}
                 onChange={(e) => setSelectedCameraIndex(Number(e.target.value))}
                 disabled={sourceType !== 'camera' || status.is_running}
+                aria-label="Dispositivo de cámara web disponible"
                 className="bg-slate-900 border border-slate-700 rounded-lg px-3 py-1.5 text-xs text-white focus:outline-none focus:border-orange-500 w-full disabled:opacity-50"
               >
                 {cameras.length === 0 ? (
@@ -357,18 +400,28 @@ export default function MonitoringView({ latestAlert }) {
                 type="button"
                 onClick={loadCameras}
                 disabled={status.is_running}
+                aria-label="Volver a escanear cámaras web conectadas"
                 title="Volver a escanear cámaras"
-                className="p-2 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-lg disabled:opacity-50"
+                className="p-2 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-lg disabled:opacity-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-orange-500"
               >
-                <RefreshCw className="w-3.5 h-3.5" />
+                <RefreshCw className="w-3.5 h-3.5" aria-hidden="true" />
               </button>
             </div>
           </div>
 
           {/* Opción 2: Archivo de Video desde el Explorador */}
           <div 
+            role="button"
+            tabIndex={0}
             onClick={() => !status.is_running && setSourceType('file')}
-            className={`p-4 rounded-xl border transition-all cursor-pointer ${
+            onKeyDown={(e) => {
+              if (e.key === 'Enter' || e.key === ' ') {
+                e.preventDefault();
+                if (!status.is_running) setSourceType('file');
+              }
+            }}
+            aria-label="Seleccionar fuente de archivo de video local"
+            className={`p-4 rounded-xl border transition-all cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-orange-500 ${
               sourceType === 'file'
                 ? 'bg-orange-500/10 border-orange-500/50 ring-1 ring-orange-500/30'
                 : 'bg-slate-950/60 border-slate-800 hover:border-slate-700'
@@ -376,7 +429,7 @@ export default function MonitoringView({ latestAlert }) {
           >
             <div className="flex items-center justify-between mb-2">
               <div className="flex items-center space-x-2">
-                <FolderOpen className={`w-4 h-4 ${sourceType === 'file' ? 'text-orange-400' : 'text-slate-400'}`} />
+                <FolderOpen className={`w-4 h-4 ${sourceType === 'file' ? 'text-orange-400' : 'text-slate-400'}`} aria-hidden="true" />
                 <span className="text-xs font-bold text-white">Elegir Video desde el Explorador</span>
               </div>
               <input
@@ -385,6 +438,7 @@ export default function MonitoringView({ latestAlert }) {
                 checked={sourceType === 'file'}
                 onChange={() => !status.is_running && setSourceType('file')}
                 disabled={status.is_running}
+                aria-label="Captura mediante archivo de video"
                 className="text-orange-500 focus:ring-orange-500"
               />
             </div>
@@ -396,15 +450,16 @@ export default function MonitoringView({ latestAlert }) {
                 accept="video/*"
                 onChange={handleFileChange}
                 disabled={sourceType !== 'file' || status.is_running}
+                aria-label="Seleccionar archivo de video del sistema de archivos"
                 className="hidden"
               />
               <button
                 type="button"
                 onClick={() => fileInputRef.current?.click()}
                 disabled={sourceType !== 'file' || status.is_running}
-                className="px-3 py-1.5 bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 rounded-lg text-xs font-semibold flex items-center space-x-2 disabled:opacity-50"
+                className="px-3 py-1.5 bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 rounded-lg text-xs font-semibold flex items-center space-x-2 disabled:opacity-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-orange-500"
               >
-                <Upload className="w-3.5 h-3.5 text-orange-400" />
+                <Upload className="w-3.5 h-3.5 text-orange-400" aria-hidden="true" />
                 <span>Seleccionar Archivo...</span>
               </button>
 
@@ -413,11 +468,11 @@ export default function MonitoringView({ latestAlert }) {
                   <span className="text-amber-400">Cargando archivo...</span>
                 ) : selectedFile ? (
                   <span className="text-emerald-400 flex items-center space-x-1 truncate" title={selectedFile.name}>
-                    <CheckCircle2 className="w-3.5 h-3.5 flex-shrink-0" />
+                    <CheckCircle2 className="w-3.5 h-3.5 flex-shrink-0" aria-hidden="true" />
                     <span className="truncate">{selectedFile.name}</span>
                   </span>
                 ) : (
-                  <span className="text-slate-500">Ningún archivo seleccionado</span>
+                  <span className="text-slate-400">Ningún archivo seleccionado</span>
                 )}
               </div>
             </div>
@@ -438,14 +493,21 @@ export default function MonitoringView({ latestAlert }) {
           >
             
             <img
-              src={`/api/stream/video_feed?token=${encodeURIComponent(token || '')}&t=${status.is_running ? 'live' : 'standby'}`}
-              alt="Transmisión de Video en Vivo"
+              src={
+                !isActive
+                  ? ''
+                  : status.is_running
+                  ? `/api/stream/video_feed?token=${encodeURIComponent(token || '')}&stream_id=${streamSessionId}`
+                  : `/api/stream/video_feed?token=${encodeURIComponent(token || '')}&stream_id=standby_${streamSessionId}`
+              }
+              alt={status.is_running ? 'Transmisión de video en vivo con detección de EPP' : 'Transmisión en espera, monitoreo detenido'}
               className="w-full h-full object-contain"
+              onError={handleImageError}
             />
 
             {/* Badge de Estado Superior */}
             <div className="absolute top-4 left-4 bg-slate-950/90 backdrop-blur-md px-3.5 py-1.5 rounded-full border border-slate-700/80 flex items-center space-x-2 text-xs shadow-lg">
-              <span className={`w-2.5 h-2.5 rounded-full ${status.is_running ? 'bg-emerald-500' : 'bg-amber-500'}`} />
+              <span className={`w-2.5 h-2.5 rounded-full ${status.is_running ? 'bg-emerald-500' : 'bg-amber-500'}`} aria-hidden="true" />
               <span className="font-semibold text-slate-100">
                 {status.is_running ? `EN VIVO: ${status.current_source_name}` : 'MONITOREO DETENIDO'}
               </span>
@@ -471,7 +533,7 @@ export default function MonitoringView({ latestAlert }) {
               </div>
             )}
 
-            {/* Leyenda Multimodal (No solo color) y Botón de Pantalla Completa */}
+            {/* Leyenda Multimodal y Botón de Pantalla Completa */}
             <div className="absolute bottom-4 left-4 right-4 bg-slate-950/90 backdrop-blur-md px-4 py-2.5 rounded-xl border border-slate-700/80 flex flex-wrap items-center justify-between text-xs text-slate-200 gap-2 shadow-lg">
               <div className="flex flex-wrap items-center gap-4">
                 <span className="flex items-center space-x-2">
@@ -488,35 +550,48 @@ export default function MonitoringView({ latestAlert }) {
                 </span>
               </div>
 
-              <button
-                type="button"
-                onClick={toggleFullscreen}
-                aria-label={isFullscreen ? 'Salir de pantalla completa' : 'Ver video en pantalla completa'}
-                className="p-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-200 hover:text-white border border-slate-700 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-orange-500 transition-colors flex items-center space-x-1.5 text-xs font-semibold"
-              >
-                {isFullscreen ? (
-                  <>
-                    <Minimize2 className="w-4 h-4" aria-hidden="true" />
-                    <span className="hidden sm:inline">Restaurar</span>
-                  </>
-                ) : (
-                  <>
-                    <Maximize2 className="w-4 h-4" aria-hidden="true" />
-                    <span className="hidden sm:inline">Pantalla Completa</span>
-                  </>
-                )}
-              </button>
+              <div className="flex items-center space-x-2">
+                <button
+                  type="button"
+                  onClick={() => setStreamSessionId(Date.now())}
+                  aria-label="Refrescar señal de video en vivo"
+                  title="Refrescar señal de video"
+                  className="p-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-200 hover:text-white border border-slate-700 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-orange-500 transition-colors flex items-center space-x-1.5 text-xs font-semibold"
+                >
+                  <RefreshCw className="w-4 h-4" aria-hidden="true" />
+                  <span className="hidden sm:inline">Refrescar</span>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={toggleFullscreen}
+                  aria-label={isFullscreen ? 'Salir de pantalla completa' : 'Ver video en pantalla completa'}
+                  className="p-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-200 hover:text-white border border-slate-700 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-orange-500 transition-colors flex items-center space-x-1.5 text-xs font-semibold"
+                >
+                  {isFullscreen ? (
+                    <>
+                      <Minimize2 className="w-4 h-4" aria-hidden="true" />
+                      <span className="hidden sm:inline">Restaurar</span>
+                    </>
+                  ) : (
+                    <>
+                      <Maximize2 className="w-4 h-4" aria-hidden="true" />
+                      <span className="hidden sm:inline">Pantalla Completa</span>
+                    </>
+                  )}
+                </button>
+              </div>
             </div>
 
           </div>
         </div>
 
-        {/* PANEL LATERAL DE ALERTAS E INCIDENCIAS (1 columna) */}
+        {/* PANEL LATERAL DE ALERTAS E INCIDENCIAS ACCESIBLE CON TECLADO (1 columna) */}
         <div className="bg-slate-900 border border-slate-800 rounded-2xl p-5 flex flex-col h-[560px]">
           
           <div className="flex items-center justify-between pb-3 border-b border-slate-800">
             <div className="flex items-center space-x-2">
-              <ShieldAlert className="w-5 h-5 text-rose-400" />
+              <ShieldAlert className="w-5 h-5 text-rose-400" aria-hidden="true" />
               <h3 className="font-bold text-white text-sm">Alertas en Tiempo Real</h3>
             </div>
             <span className="text-[11px] font-semibold px-2 py-0.5 rounded-full bg-slate-800 text-slate-300">
@@ -524,19 +599,25 @@ export default function MonitoringView({ latestAlert }) {
             </span>
           </div>
 
-          <div className="flex-1 overflow-y-auto space-y-3 mt-3 pr-1">
+          <div 
+            className="flex-1 overflow-y-auto space-y-3 mt-3 pr-1"
+            role="feed"
+            aria-label="Lista de alertas de infracciones en tiempo real"
+          >
             {liveIncidents.length === 0 ? (
-              <div className="h-full flex flex-col items-center justify-center text-center text-slate-500 space-y-2">
-                <ShieldCheck className="w-10 h-10 text-emerald-500/40" />
+              <div className="h-full flex flex-col items-center justify-center text-center text-slate-400 space-y-2">
+                <ShieldCheck className="w-10 h-10 text-emerald-500/40" aria-hidden="true" />
                 <p className="text-xs">No hay infracciones detectadas.</p>
-                <p className="text-[10px] text-slate-600">Inicie la detección para comenzar el seguimiento.</p>
+                <p className="text-[10px] text-slate-400">Inicie la detección para comenzar el seguimiento.</p>
               </div>
             ) : (
               liveIncidents.map((inc) => (
-                <div
+                <button
                   key={inc.id}
+                  type="button"
                   onClick={() => setSelectedIncidentModal(inc)}
-                  className="bg-slate-950 hover:bg-slate-800/60 cursor-pointer border border-slate-800/80 hover:border-rose-500/40 p-3 rounded-xl transition-all space-y-2 group"
+                  aria-label={`Ver evidencia de ${formatViolationName(inc.violation_type)} en sujeto ${inc.track_id}`}
+                  className="w-full text-left bg-slate-950 hover:bg-slate-800/60 cursor-pointer border border-slate-800/80 hover:border-rose-500/40 p-3 rounded-xl transition-all space-y-2 group focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-orange-500"
                 >
                   <div className="flex items-start justify-between">
                     <div>
@@ -547,9 +628,9 @@ export default function MonitoringView({ latestAlert }) {
                         Sujeto #{inc.track_id}
                       </h4>
                     </div>
-                    <div className="text-[11px] text-slate-400 flex items-center space-x-1">
-                      <Clock className="w-3 h-3" />
-                      <span>{new Date(inc.timestamp).toLocaleTimeString()}</span>
+                    <div className="text-[11px] text-slate-300 flex items-center space-x-1">
+                      <Clock className="w-3 h-3 text-slate-400" aria-hidden="true" />
+                      <time dateTime={new Date(inc.timestamp).toISOString()}>{formatTime(inc.timestamp)}</time>
                     </div>
                   </div>
 
@@ -557,18 +638,18 @@ export default function MonitoringView({ latestAlert }) {
                     <div className="w-16 h-12 rounded-lg bg-slate-900 border border-slate-800 overflow-hidden flex-shrink-0">
                       <img
                         src={getFrameUrl(inc.frame_url)}
-                        alt="Evidencia"
+                        alt={`Evidencia de ${formatViolationName(inc.violation_type)}`}
                         className="w-full h-full object-cover group-hover:scale-105 transition-transform"
                       />
                     </div>
-                    <div className="text-[11px] text-slate-400 space-y-0.5">
-                      <p>Confianza: <strong className="text-slate-200">{(inc.confidence * 100).toFixed(0)}%</strong></p>
+                    <div className="text-[11px] text-slate-300 space-y-0.5">
+                      <p>Confianza: <strong className="text-slate-100 font-mono">{(inc.confidence * 100).toFixed(0)}%</strong></p>
                       <p className="text-[10px] text-amber-400">
                         Cooldown 60s activado
                       </p>
                     </div>
                   </div>
-                </div>
+                </button>
               ))
             )}
           </div>
@@ -577,58 +658,11 @@ export default function MonitoringView({ latestAlert }) {
 
       </div>
 
-      {/* MODAL DE EVIDENCIA */}
-      {selectedIncidentModal && (
-        <div 
-          onClick={() => setSelectedIncidentModal(null)}
-          role="dialog"
-          aria-modal="true"
-          aria-labelledby="modal-evidence-title"
-          aria-describedby="modal-evidence-desc"
-          className="fixed inset-0 z-50 bg-black/85 backdrop-blur-sm flex items-center justify-center p-4 animate-in fade-in duration-150"
-        >
-          <div 
-            onClick={(e) => e.stopPropagation()}
-            className="bg-slate-900 border border-slate-800 rounded-2xl max-w-3xl w-full p-6 space-y-4 shadow-2xl"
-          >
-            <div className="flex items-center justify-between border-b border-slate-800 pb-3 gap-3">
-              <div>
-                <h3 id="modal-evidence-title" className="text-base font-bold text-white flex items-center space-x-2">
-                  <ShieldAlert className="w-5 h-5 text-rose-400 flex-shrink-0" aria-hidden="true" />
-                  <span>Evidencia de Infracción: {formatViolationName(selectedIncidentModal.violation_type)}</span>
-                </h3>
-                <p id="modal-evidence-desc" className="text-xs text-slate-300 mt-0.5">
-                  ID: <span className="font-mono text-slate-400">{selectedIncidentModal.id}</span> &bull; Sujeto <strong className="text-white">#{selectedIncidentModal.track_id}</strong> &bull; <time className="font-mono">{new Date(selectedIncidentModal.timestamp).toLocaleString()}</time>
-                </p>
-              </div>
-              <button
-                ref={modalCloseBtnRef}
-                type="button"
-                onClick={() => setSelectedIncidentModal(null)}
-                aria-label="Cerrar visor de evidencia (presione Escape)"
-                className="inline-flex items-center space-x-1.5 px-3 py-1.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-200 hover:text-white border border-slate-700 text-xs font-semibold focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-orange-500 transition-colors flex-shrink-0"
-              >
-                <X className="w-4 h-4" aria-hidden="true" />
-                <span>Cerrar</span>
-                <kbd className="hidden sm:inline-block ml-1 text-[10px] font-mono text-slate-400 bg-slate-950 px-1.5 py-0.5 rounded border border-slate-700">ESC</kbd>
-              </button>
-            </div>
-
-            <div className="bg-black rounded-xl overflow-hidden border border-slate-800 max-h-[480px] flex items-center justify-center">
-              <img
-                src={getFrameUrl(selectedIncidentModal.frame_url)}
-                alt={`Evidencia de ${formatViolationName(selectedIncidentModal.violation_type)} en trabajador #${selectedIncidentModal.track_id}`}
-                className="max-h-[480px] w-auto object-contain"
-              />
-            </div>
-
-            <div className="flex justify-between items-center text-xs text-slate-300 pt-2 border-t border-slate-800/80">
-              <span>Nivel de Confianza: <strong className="text-white font-mono tabular-nums">{(selectedIncidentModal.confidence * 100).toFixed(1)}%</strong></span>
-              <span className="text-slate-400">Almacenado localmente &bull; SQLite On-Premise</span>
-            </div>
-          </div>
-        </div>
-      )}
+      {/* MODAL DE EVIDENCIA REUTILIZABLE Y ACCESIBLE */}
+      <EvidenceModal
+        incident={selectedIncidentModal}
+        onClose={() => setSelectedIncidentModal(null)}
+      />
 
     </div>
   );
