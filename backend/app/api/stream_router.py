@@ -1,6 +1,7 @@
 import cv2
 import time
 import uuid
+import asyncio
 from pathlib import Path
 from typing import List, Optional
 from fastapi import APIRouter, HTTPException, UploadFile, File, Form, Depends, Query, Header, status
@@ -22,19 +23,19 @@ class StartStreamRequest(BaseModel):
     file_path: Optional[str] = None
     name: Optional[str] = "Entrada de Video"
 
-def generate_frames():
-    """Generador continuo de frames MJPEG codificados para el navegador web"""
+async def generate_frames():
+    """Generador continuo asíncrono de frames MJPEG codificados para el navegador web (#393)"""
     while True:
         frame_bytes = video_engine.get_latest_jpeg()
         if frame_bytes is not None:
             yield (b'--frame\r\n'
                    b'Content-Type: image/jpeg\r\n\r\n' + frame_bytes + b'\r\n')
-            time.sleep(0.033)  # ~30 FPS máximo de refresco en streaming
+            await asyncio.sleep(0.033)  # ~30 FPS máximo de refresco en streaming sin agotar threadpool
         else:
-            time.sleep(0.05)
+            await asyncio.sleep(0.05)
 
 @router.get("/video_feed")
-def video_feed(
+async def video_feed(
     token: Optional[str] = Query(None),
     stream_id: Optional[str] = Query(None),
     authorization: Optional[str] = Header(None),
@@ -169,6 +170,7 @@ def start_stream(
     """
     Inicia el procesamiento e inferencia de video con la fuente elegida.
     Valida rigurosamente que las fuentes basadas en archivo provengan de la carpeta autorizada.
+    Apertura síncrona con reporte de error descriptivo 400 (#389).
     """
     try:
         if payload.source_type == "camera":
@@ -189,7 +191,13 @@ def start_stream(
         else:
             raise HTTPException(status_code=400, detail="Tipo de fuente no soportado (debe ser 'camera' o 'file')")
 
-        video_engine.start(source=source_val, source_name=name)
+        try:
+            video_engine.start(source=source_val, source_name=name)
+        except RuntimeError as err:
+            raise HTTPException(
+                status_code=400,
+                detail=f"No se pudo abrir la fuente de video especificada: {str(err)}"
+            )
 
         return {
             "success": True,
@@ -219,7 +227,7 @@ def stop_stream(current_user: User = Depends(get_current_user)):
 def get_stream_status(current_user: User = Depends(get_current_user)):
     """Retorna el estado y telemetría actual de la transmisión de video (Autenticado)"""
     return {
-        "is_running": video_engine._is_running,
+        "is_running": video_engine.is_running,
         "fps": video_engine.current_fps,
         "current_source_name": video_engine.current_source_name,
         "active_violations": video_engine.active_violations_count,

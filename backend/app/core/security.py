@@ -9,6 +9,8 @@ def hash_password(password: str) -> str:
     salt = bcrypt.gensalt()
     return bcrypt.hashpw(password.encode("utf-8"), salt).decode("utf-8")
 
+get_password_hash = hash_password
+
 def verify_password(plain_password: str, hashed_password: str) -> bool:
     """Verifica contraseña en texto plano contra el hash guardado"""
     try:

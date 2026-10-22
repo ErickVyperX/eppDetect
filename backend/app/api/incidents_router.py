@@ -132,23 +132,35 @@ def get_metrics_summary(
             max_count = count
             top_violation = v_type
 
-    # Distribución por horas de las últimas 24 horas (en hora de Lima)
-    twenty_four_hours_ago = get_lima_now_naive() - timedelta(hours=24)
+    # Distribución cronológica continua de las últimas 24 horas (#397)
+    now = get_lima_now_naive()
+    current_hour_start = now.replace(minute=0, second=0, microsecond=0)
+    start_time = current_hour_start - timedelta(hours=23)
+
     recent_incidents = (
         db.query(Incident)
-        .filter(Incident.timestamp >= twenty_four_hours_ago)
+        .filter(Incident.timestamp >= start_time)
         .all()
     )
 
-    hourly_dict = {f"{h:02d}:00": 0 for h in range(24)}
+    # Generar los 24 intervalos horarios secuenciales desde (now - 23h) hasta la hora actual
+    hourly_slots = []
+    slot_counts = {}
+    for i in range(24):
+        slot_dt = start_time + timedelta(hours=i)
+        slot_key = slot_dt.strftime("%Y-%m-%d %H")
+        slot_label = slot_dt.strftime("%H:00")
+        hourly_slots.append((slot_key, slot_label))
+        slot_counts[slot_key] = 0
+
     for inc in recent_incidents:
-        hour_str = inc.timestamp.strftime("%H:00")
-        if hour_str in hourly_dict:
-            hourly_dict[hour_str] += 1
+        inc_key = inc.timestamp.strftime("%Y-%m-%d %H")
+        if inc_key in slot_counts:
+            slot_counts[inc_key] += 1
 
     hourly_distribution = [
-        {"hora": hour, "infracciones": count}
-        for hour, count in sorted(hourly_dict.items())
+        {"hora": label, "infracciones": slot_counts[key]}
+        for key, label in hourly_slots
     ]
 
     return MetricsSummary(

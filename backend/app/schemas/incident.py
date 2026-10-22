@@ -1,4 +1,4 @@
-from pydantic import BaseModel
+from pydantic import BaseModel, ConfigDict
 from datetime import datetime
 from typing import Optional, List, Dict
 
@@ -13,8 +13,13 @@ class IncidentResponse(BaseModel):
     resolved: bool
     notes: Optional[str] = None
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
+
+class ViolationCount(BaseModel):
+    violation_type: str
+    count: int
+
+    model_config = ConfigDict(from_attributes=True)
 
 class MetricsSummary(BaseModel):
     total_incidents: int

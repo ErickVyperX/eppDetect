@@ -1,0 +1,19 @@
+# Configuración de Ruff para EPP SafetyVision Backend
+line-length = 120
+target-version = "py310"
+
+exclude = [
+    ".git",
+    ".venv",
+    "venv",
+    "frontend",
+    "node_modules",
+    "__pycache__",
+    "storage",
+    "dist",
+    "build",
+]
+
+[lint]
+select = ["E", "F", "W", "I", "UP"]
+ignore = ["E501"]  # Longitud de línea delegada al formateador
