@@ -154,7 +154,7 @@ export default function LoginView() {
 
         {/* Footer */}
         <div className="text-center text-xs text-slate-500">
-          Entorno de Ejecución Local On-Premise &bull; Modelo YOLOv26s v1
+          Entorno de Ejecución Local On-Premise &bull; Modelo YOLOv26s v1.2
         </div>
 
       </div>
