@@ -74,21 +74,21 @@ flowchart LR
     YOLO --> Tracker
     Tracker --> Engine
     Engine --> Cooldown
-    Cooldown -->|Infracción fuera de cooldown| Pool
+    Cooldown -->|"Infracción fuera de cooldown"| Pool
     Pool --> Storage
     Pool --> DB
     Storage --> Disk
-    Cooldown -->|Alerta instantánea| WS_Alerts
+    Cooldown -->|"Alerta instantánea"| WS_Alerts
 
-    UI_Login -->|POST /api/auth/login| API_Auth
+    UI_Login -->|"POST /api/auth/login"| API_Auth
     API_Auth --> DB
-    UI_Mon -->|Control con Bearer JWT| API_Stream
+    UI_Mon -->|"Control con Bearer JWT"| API_Stream
     API_Stream --> Engine
-    UI_Mon -.->|MJPEG (?token=... o Bearer)| API_Stream
-    WS_Alerts -.->|Notificación Push WS| UI_Mon
-    UI_Met -->|Consultas con Bearer JWT| API_Incidents
+    UI_Mon -.->|"MJPEG con token o Bearer"| API_Stream
+    WS_Alerts -.->|"Notificación Push WS"| UI_Mon
+    UI_Met -->|"Consultas con Bearer JWT"| API_Incidents
     API_Incidents --> DB
-    UI_Modal -->|GET /api/incidents/{id}/frame| API_Incidents
+    UI_Modal -->|"GET /api/incidents/{id}/frame"| API_Incidents
     API_Incidents --> Disk
 ```
 
