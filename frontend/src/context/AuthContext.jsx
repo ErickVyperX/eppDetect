@@ -11,11 +11,23 @@ export function AuthProvider({ children }) {
     return saved ? JSON.parse(saved) : null;
   });
   const [loading, setLoading] = useState(true);
-  const [soundEnabled, setSoundEnabled] = useState(true);
+  const [soundEnabled, setSoundEnabled] = useState(() => {
+    const saved = localStorage.getItem('epp_sound_enabled');
+    return saved !== null ? saved === 'true' : true;
+  });
 
   useEffect(() => {
     soundService.setEnabled(soundEnabled);
+    localStorage.setItem('epp_sound_enabled', String(soundEnabled));
   }, [soundEnabled]);
+
+  useEffect(() => {
+    const handleUnauthorized = () => {
+      logout();
+    };
+    window.addEventListener('epp_auth_unauthorized', handleUnauthorized);
+    return () => window.removeEventListener('epp_auth_unauthorized', handleUnauthorized);
+  }, []);
 
   useEffect(() => {
     const checkAuth = async () => {

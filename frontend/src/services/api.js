@@ -13,78 +13,97 @@ export const getAuthHeaders = (extraHeaders = {}) => {
   return headers;
 };
 
+/**
+ * Realiza una petición HTTP segura:
+ * - Evita invocar res.json() antes de comprobar res.ok.
+ * - Lee el cuerpo con res.text() y parsea JSON dentro de un bloque seguro para evitar
+ *   errores de sintaxis ('Unexpected token < in JSON') si el servidor devuelve HTML o texto plano.
+ * - En caso de error 401 Unauthorized (excepto en login), limpia la sesión y emite un evento global.
+ */
+async function safeFetch(url, options = {}, isLogin = false) {
+  const res = await fetch(url, options);
+
+  const rawText = await res.text();
+  let data = null;
+  if (rawText && rawText.trim().length > 0) {
+    try {
+      data = JSON.parse(rawText);
+    } catch {
+      data = null;
+    }
+  }
+
+  if (!res.ok) {
+    // Si la sesión expiró o es inválida (401) y no es la ruta de login, limpiar sesión y notificar
+    if (res.status === 401 && !isLogin) {
+      localStorage.removeItem('epp_token');
+      localStorage.removeItem('epp_user');
+      window.dispatchEvent(new CustomEvent('epp_auth_unauthorized'));
+    }
+
+    const detailMsg = data && (data.detail || data.message || data.error);
+    const errorMessage = detailMsg || (rawText && rawText.length < 200 ? rawText : `Error HTTP ${res.status}: ${res.statusText}`);
+    const error = new Error(errorMessage);
+    error.status = res.status;
+    error.data = data;
+    throw error;
+  }
+
+  return data;
+}
+
 export const api = {
   // Autenticación
   async login(email, password) {
-    const res = await fetch(`${API_BASE}/auth/login`, {
+    return safeFetch(`${API_BASE}/auth/login`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ email, password })
-    });
-    const data = await res.json();
-    if (!res.ok) {
-      throw new Error(data.detail || 'Error al iniciar sesión');
-    }
-    return data;
+    }, true);
   },
 
   async getMe(token) {
-    const res = await fetch(`${API_BASE}/auth/me`, {
+    return safeFetch(`${API_BASE}/auth/me`, {
       headers: { 'Authorization': `Bearer ${token}` }
     });
-    if (!res.ok) throw new Error('Sesión no válida');
-    return res.json();
   },
 
   // Detección de cámaras y control de streaming (Autenticados)
   async getCameras() {
-    const res = await fetch(`${API_BASE}/stream/cameras`, {
+    return safeFetch(`${API_BASE}/stream/cameras`, {
       headers: getAuthHeaders()
     });
-    if (!res.ok) throw new Error('Error al detectar cámaras web');
-    return res.json();
   },
 
   async uploadVideo(file) {
     const formData = new FormData();
     formData.append('file', file);
-    const res = await fetch(`${API_BASE}/stream/upload_video`, {
+    return safeFetch(`${API_BASE}/stream/upload_video`, {
       method: 'POST',
       headers: getAuthHeaders(),
       body: formData
     });
-    const data = await res.json();
-    if (!res.ok) throw new Error(data.detail || 'Error al subir archivo de video');
-    return data;
   },
 
   async startStream({ source_type, camera_index, file_path, name }) {
-    const res = await fetch(`${API_BASE}/stream/start`, {
+    return safeFetch(`${API_BASE}/stream/start`, {
       method: 'POST',
       headers: getAuthHeaders({ 'Content-Type': 'application/json' }),
       body: JSON.stringify({ source_type, camera_index, file_path, name })
     });
-    const data = await res.json();
-    if (!res.ok) throw new Error(data.detail || 'Error al iniciar monitoreo');
-    return data;
   },
 
   async stopStream() {
-    const res = await fetch(`${API_BASE}/stream/stop`, {
+    return safeFetch(`${API_BASE}/stream/stop`, {
       method: 'POST',
       headers: getAuthHeaders()
     });
-    const data = await res.json();
-    if (!res.ok) throw new Error(data.detail || 'Error al detener monitoreo');
-    return data;
   },
 
   async getStreamStatus() {
-    const res = await fetch(`${API_BASE}/stream/status`, {
+    return safeFetch(`${API_BASE}/stream/status`, {
       headers: getAuthHeaders()
     });
-    if (!res.ok) throw new Error('Error al obtener estado');
-    return res.json();
   },
 
   // Incidencias (Autenticadas)
@@ -96,19 +115,15 @@ export const api = {
     if (date_filter) {
       url += `&date_filter=${encodeURIComponent(date_filter)}`;
     }
-    const res = await fetch(url, {
+    return safeFetch(url, {
       headers: getAuthHeaders()
     });
-    if (!res.ok) throw new Error('Error al obtener incidencias');
-    return res.json();
   },
 
   // Métricas (Autenticadas)
   async getMetricsSummary() {
-    const res = await fetch(`${API_BASE}/incidents/metrics/summary`, {
+    return safeFetch(`${API_BASE}/incidents/metrics/summary`, {
       headers: getAuthHeaders()
     });
-    if (!res.ok) throw new Error('Error al obtener resumen de métricas');
-    return res.json();
   }
 };
