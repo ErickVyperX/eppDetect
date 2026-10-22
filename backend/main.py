@@ -28,7 +28,6 @@ async def lifespan(app: FastAPI):
     print("[Main] Servidor iniciado en http://127.0.0.1:8000.")
     print("[Main] Motor de detección en espera. El supervisor debe elegir la fuente de video en la interfaz.")
 
-
     yield
 
     # Ciclo de apagado
@@ -42,12 +41,21 @@ app = FastAPI(
     lifespan=lifespan
 )
 
-# CORS habilitado para desarrollo y ejecución local
+# Middleware de Cabeceras de Seguridad HTTP (SEC-14)
+@app.middleware("http")
+async def add_security_headers(request, call_next):
+    response = await call_next(request)
+    response.headers["X-Content-Type-Options"] = "nosniff"
+    response.headers["X-Frame-Options"] = "DENY"
+    response.headers["Referrer-Policy"] = "strict-origin-when-cross-origin"
+    return response
+
+# CORS restringido a los orígenes autorizados de la aplicación (SEC-09)
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=settings.ALLOWED_ORIGINS,
     allow_credentials=True,
-    allow_methods=["*"],
+    allow_methods=["GET", "POST", "OPTIONS"],
     allow_headers=["*"],
 )
 
@@ -57,21 +65,25 @@ app.include_router(stream_router, prefix=settings.API_V1_STR)
 app.include_router(incidents_router, prefix=settings.API_V1_STR)
 app.include_router(ws_router)
 
-# Servir frames estáticos
-app.mount("/static/incidents", StaticFiles(directory=str(settings.INCIDENTS_STORAGE_DIR)), name="incidents_static")
+# NOTA (SEC-13): Se retira app.mount("/static/incidents", ...) para proteger datos personales
+# y biométricos de los trabajadores. Las evidencias fotográficas se sirven exclusivamente con
+# autenticación y autorización controlada a través de /api/incidents/{incident_id}/frame.
 
-# Montar frontend compilado (si existe)
+# Montar frontend compilado (si existe) con verificación estricta de Path Traversal (SEC-03)
 FRONTEND_DIST = settings.PROJECT_ROOT / "frontend" / "dist"
 if FRONTEND_DIST.exists():
     app.mount("/assets", StaticFiles(directory=str(FRONTEND_DIST / "assets")), name="assets")
 
     @app.get("/{full_path:path}")
     async def serve_spa(full_path: str):
-        file_path = FRONTEND_DIST / full_path
-        if file_path.is_file():
-            return FileResponse(file_path)
+        base_dist = FRONTEND_DIST.resolve()
+        requested_file = (base_dist / full_path).resolve()
+
+        if requested_file.is_file() and requested_file.is_relative_to(base_dist):
+            return FileResponse(requested_file)
+
         return FileResponse(
-            FRONTEND_DIST / "index.html",
+            base_dist / "index.html",
             headers={"Cache-Control": "no-cache, no-store, must-revalidate"}
         )
 else:

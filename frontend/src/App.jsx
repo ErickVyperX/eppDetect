@@ -12,21 +12,31 @@ export default function App() {
   const [latestAlert, setLatestAlert] = useState(null);
   const wsRef = useRef(null);
 
-  // Conexión persistente con WebSockets para recepción de alertas
+  // Conexión persistente con WebSockets para recepción de alertas (Protegida con Token y Origin)
   useEffect(() => {
     if (!user) return;
 
     let socket;
     let pingInterval;
+    let reconnectTimeout = null;
+    let isDisposed = false;
 
     const connectWebSocket = () => {
+      if (isDisposed) return;
+      const token = localStorage.getItem('epp_token');
+      if (!token) return;
+
       const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-      const wsUrl = `${protocol}//${window.location.host}/ws/alerts`;
+      const wsUrl = `${protocol}//${window.location.host}/ws/alerts?token=${encodeURIComponent(token)}`;
 
       socket = new WebSocket(wsUrl);
       wsRef.current = socket;
 
       socket.onopen = () => {
+        if (isDisposed) {
+          socket.close();
+          return;
+        }
         setWsConnected(true);
         // Ping de mantenimiento cada 15 segundos
         pingInterval = setInterval(() => {
@@ -49,9 +59,11 @@ export default function App() {
 
       socket.onclose = () => {
         setWsConnected(false);
-        clearInterval(pingInterval);
-        // Reintentar conexión en 3 segundos
-        setTimeout(connectWebSocket, 3000);
+        if (pingInterval) clearInterval(pingInterval);
+        if (!isDisposed) {
+          // Reintentar conexión en 3 segundos
+          reconnectTimeout = setTimeout(connectWebSocket, 3000);
+        }
       };
 
       socket.onerror = () => {
@@ -62,6 +74,8 @@ export default function App() {
     connectWebSocket();
 
     return () => {
+      isDisposed = true;
+      if (reconnectTimeout) clearTimeout(reconnectTimeout);
       if (socket) socket.close();
       if (pingInterval) clearInterval(pingInterval);
     };

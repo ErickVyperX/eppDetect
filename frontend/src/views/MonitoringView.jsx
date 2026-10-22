@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { api } from '../services/api';
 import { soundService } from '../services/sound';
+import { useAuth } from '../context/AuthContext';
 import { 
   Camera, 
   Video, 
@@ -23,6 +24,15 @@ import {
 } from 'lucide-react';
 
 export default function MonitoringView({ latestAlert }) {
+  const { token } = useAuth();
+
+  const getFrameUrl = (url) => {
+    if (!url) return '';
+    if (!token) return url;
+    const separator = url.includes('?') ? '&' : '?';
+    return `${url}${separator}token=${encodeURIComponent(token)}`;
+  };
+
   // Configuración de Fuente de Video
   const [sourceType, setSourceType] = useState('camera'); // 'camera' o 'file'
   const [cameras, setCameras] = useState([]);
@@ -428,7 +438,7 @@ export default function MonitoringView({ latestAlert }) {
           >
             
             <img
-              src={`/api/stream/video_feed?t=${status.is_running ? 'live' : 'standby'}`}
+              src={`/api/stream/video_feed?token=${encodeURIComponent(token || '')}&t=${status.is_running ? 'live' : 'standby'}`}
               alt="Transmisión de Video en Vivo"
               className="w-full h-full object-contain"
             />
@@ -546,7 +556,7 @@ export default function MonitoringView({ latestAlert }) {
                   <div className="flex items-center space-x-3 pt-1">
                     <div className="w-16 h-12 rounded-lg bg-slate-900 border border-slate-800 overflow-hidden flex-shrink-0">
                       <img
-                        src={inc.frame_url}
+                        src={getFrameUrl(inc.frame_url)}
                         alt="Evidencia"
                         className="w-full h-full object-cover group-hover:scale-105 transition-transform"
                       />
@@ -606,7 +616,7 @@ export default function MonitoringView({ latestAlert }) {
 
             <div className="bg-black rounded-xl overflow-hidden border border-slate-800 max-h-[480px] flex items-center justify-center">
               <img
-                src={selectedIncidentModal.frame_url}
+                src={getFrameUrl(selectedIncidentModal.frame_url)}
                 alt={`Evidencia de ${formatViolationName(selectedIncidentModal.violation_type)} en trabajador #${selectedIncidentModal.track_id}`}
                 className="max-h-[480px] w-auto object-contain"
               />

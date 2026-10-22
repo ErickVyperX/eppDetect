@@ -8,20 +8,21 @@ from app.api.deps import get_current_user
 
 router = APIRouter(prefix="/auth", tags=["Autenticación"])
 
+# Hash bcrypt precalculado con costo estándar (12 rounds) para igualar el tiempo de cómputo
+# frente a usuarios inexistentes, mitigando ataques de timing para enumeración de correos.
+DUMMY_HASH = "$2b$12$e8Y5t1hYt1hYt1hYt1hYt.1hYt1hYt1hYt1hYt1hYt1hYt1hYt1hY"
+
 @router.post("/login", response_model=TokenResponse)
 def login(payload: LoginRequest, db: Session = Depends(get_db)):
     """
     Inicio de sesión estricto mediante correo y contraseña pre-registrados en la base de datos.
-    No existe auto-recuperación de contraseña; se debe contactar al administrador.
+    Mitiga timing attacks ejecutando siempre la verificación criptográfica.
     """
     user = db.query(User).filter(User.email == payload.email).first()
-    if not user:
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Correo o contraseña incorrectos. Si olvidó sus credenciales, contacte al Administrador del Sistema."
-        )
+    target_hash = user.hashed_password if user else DUMMY_HASH
+    valid_pwd = verify_password(payload.password, target_hash)
 
-    if not verify_password(payload.password, user.hashed_password):
+    if not user or not valid_pwd:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Correo o contraseña incorrectos. Si olvidó sus credenciales, contacte al Administrador del Sistema."
