@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { api } from '../services/api';
+import { useAuth } from '../context/AuthContext';
 import { 
   BarChart3, 
   TrendingUp, 
@@ -28,6 +29,15 @@ import {
 } from 'recharts';
 
 export default function MetricsView() {
+  const { token } = useAuth();
+
+  const getFrameUrl = (url) => {
+    if (!url) return '';
+    if (!token) return url;
+    const separator = url.includes('?') ? '&' : '?';
+    return `${url}${separator}token=${encodeURIComponent(token)}`;
+  };
+
   const [metrics, setMetrics] = useState(null);
   const [incidents, setIncidents] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -411,7 +421,7 @@ export default function MetricsView() {
 
             <div className="bg-black rounded-xl overflow-hidden border border-slate-800 max-h-[480px] flex items-center justify-center">
               <img
-                src={selectedIncidentModal.frame_url}
+                src={getFrameUrl(selectedIncidentModal.frame_url)}
                 alt={`Evidencia de ${formatViolationName(selectedIncidentModal.violation_type)} en trabajador #${selectedIncidentModal.track_id}`}
                 className="max-h-[480px] w-auto object-contain"
               />

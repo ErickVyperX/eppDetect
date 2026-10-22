@@ -1,5 +1,21 @@
 import os
+import secrets
 from pathlib import Path
+
+# Cargar variables de entorno desde .env si existe
+try:
+    from dotenv import load_dotenv
+    _backend_dir = Path(__file__).resolve().parent.parent.parent
+    _env_backend = _backend_dir / ".env"
+    _env_root = _backend_dir.parent / ".env"
+    if _env_backend.is_file():
+        load_dotenv(_env_backend)
+    elif _env_root.is_file():
+        load_dotenv(_env_root)
+    else:
+        load_dotenv()
+except ImportError:
+    pass
 
 # Rutas del proyecto
 BACKEND_DIR = Path(__file__).resolve().parent.parent.parent  # .../eppDetect/backend
@@ -13,13 +29,31 @@ DB_PATH = BACKEND_DIR / "epp_database.db"
 INCIDENTS_STORAGE_DIR.mkdir(parents=True, exist_ok=True)
 UPLOADED_VIDEOS_DIR.mkdir(parents=True, exist_ok=True)
 
+# Parsear orígenes permitidos desde variable de entorno o usar valores por defecto
+_env_origins = os.getenv("ALLOWED_ORIGINS")
+if _env_origins:
+    DEFAULT_ALLOWED_ORIGINS = [o.strip() for o in _env_origins.split(",") if o.strip()]
+else:
+    DEFAULT_ALLOWED_ORIGINS = [
+        "http://localhost:3000",
+        "http://127.0.0.1:3000",
+        "http://localhost:8000",
+        "http://127.0.0.1:8000"
+    ]
+
 class Settings:
     PROJECT_NAME: str = "EPP Safety Vision - Sistema de Monitoreo de Obra"
     API_V1_STR: str = "/api"
-    SECRET_KEY: str = "epp-safety-secret-key-super-secure-local-2026"
+    # Secreto criptográfico: se lee de variable de entorno o se genera uno aleatorio seguro en memoria
+    SECRET_KEY: str = os.getenv("SECRET_KEY") or secrets.token_urlsafe(32)
     ALGORITHM: str = "HS256"
-    ACCESS_TOKEN_EXPIRE_MINUTES: int = 60 * 12  # 12 horas (turno completo)
+    ACCESS_TOKEN_EXPIRE_MINUTES: int = int(os.getenv("ACCESS_TOKEN_EXPIRE_MINUTES", str(60 * 12)))  # 12 horas por defecto
+    ALLOWED_ORIGINS: list = DEFAULT_ALLOWED_ORIGINS
     
+    # Límites de subida y extensiones de video
+    MAX_UPLOAD_SIZE_BYTES: int = 200 * 1024 * 1024  # 200 MB
+    ALLOWED_VIDEO_EXTENSIONS: set = {".mp4", ".avi", ".mkv", ".mov"}
+
     BACKEND_DIR: Path = BACKEND_DIR
     PROJECT_ROOT: Path = PROJECT_ROOT
     STORAGE_DIR: Path = STORAGE_DIR
@@ -33,9 +67,9 @@ class Settings:
     MODEL_PATH: str = str(PROJECT_ROOT / "weights_yolov26s_v1.2.pt")
     
     # Regla de Negocio: Cooldown de 60 segundos por trabajador/infracción
-    INCIDENT_COOLDOWN_SECONDS: float = 60.0
+    INCIDENT_COOLDOWN_SECONDS: float = float(os.getenv("INCIDENT_COOLDOWN_SECONDS", "60.0"))
     
     # Confidence threshold
-    CONF_THRESHOLD: float = 0.50
+    CONF_THRESHOLD: float = float(os.getenv("CONF_THRESHOLD", "0.50"))
 
 settings = Settings()

@@ -1,16 +1,17 @@
 from datetime import datetime, date, timedelta
 from pathlib import Path
 from typing import Optional, List
-from fastapi import APIRouter, Depends, HTTPException, Query, status
+from fastapi import APIRouter, Depends, HTTPException, Query, Header, status
 from fastapi.responses import FileResponse
 from sqlalchemy.orm import Session
 from sqlalchemy import func, desc
 
 from app.database import get_db
-from app.domain.models import Incident
+from app.domain.models import Incident, User
 from app.schemas.incident import IncidentResponse, MetricsSummary
 from app.core.config import settings
 from app.core.timezone import get_lima_now, get_lima_now_naive
+from app.api.deps import get_current_user, get_current_user_from_token
 
 router = APIRouter(prefix="/incidents", tags=["Incidencias y Métricas"])
 
@@ -20,9 +21,10 @@ def get_incidents(
     limit: int = Query(50, ge=1, le=200),
     violation_type: Optional[str] = None,
     date_filter: Optional[str] = None,  # YYYY-MM-DD
+    current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db)
 ):
-    """Obtiene el listado paginado de incidencias registradas con filtros opcionales"""
+    """Obtiene el listado paginado de incidencias registradas con filtros opcionales (Autenticado)"""
     query = db.query(Incident)
 
     if violation_type and violation_type != "all":
@@ -39,7 +41,7 @@ def get_incidents(
 
     incidents = query.order_by(desc(Incident.timestamp)).offset(skip).limit(limit).all()
 
-    # Formatear respuesta con la URL pública relativa del frame
+    # Formatear respuesta con la URL relativa del frame
     result = []
     for inc in incidents:
         result.append(
@@ -58,21 +60,52 @@ def get_incidents(
     return result
 
 @router.get("/{incident_id}/frame")
-def get_incident_frame(incident_id: str, db: Session = Depends(get_db)):
-    """Sirve la imagen capturada en alta resolución como evidencia de la infracción"""
+def get_incident_frame(
+    incident_id: str,
+    token: Optional[str] = Query(None),
+    authorization: Optional[str] = Header(None),
+    db: Session = Depends(get_db)
+):
+    """
+    Sirve la imagen capturada en alta resolución como evidencia de la infracción.
+    Acepta autenticación por cabecera Bearer o parámetro query '?token=...' para elementos <img>.
+    Valida contención de ruta en el sistema de archivos (prevención de Path Traversal).
+    """
+    raw_token = None
+    if authorization and authorization.startswith("Bearer "):
+        raw_token = authorization.split("Bearer ", 1)[1].strip()
+    elif token:
+        raw_token = token.strip()
+
+    if not raw_token:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Se requiere token de autenticación para consultar la evidencia fotográfica.",
+            headers={"WWW-Authenticate": "Bearer"}
+        )
+
+    # Validar sesión y usuario activo
+    get_current_user_from_token(token=raw_token, db=db)
+
     incident = db.query(Incident).filter(Incident.id == incident_id).first()
     if not incident:
         raise HTTPException(status_code=404, detail="Incidencia no encontrada")
 
-    file_path = settings.INCIDENTS_STORAGE_DIR / incident.frame_path
-    if not file_path.exists():
+    # Contención de ruta estricta
+    clean_filename = Path(incident.frame_path).name
+    file_path = (settings.INCIDENTS_STORAGE_DIR / clean_filename).resolve()
+
+    if not file_path.is_file() or not file_path.is_relative_to(settings.INCIDENTS_STORAGE_DIR.resolve()):
         raise HTTPException(status_code=404, detail="El archivo de evidencia fotográfica no existe en disco")
 
     return FileResponse(path=str(file_path), media_type="image/jpeg")
 
 @router.get("/metrics/summary", response_model=MetricsSummary)
-def get_metrics_summary(db: Session = Depends(get_db)):
-    """Calcula y devuelve métricas consolidadas para el Supervisor de Obra"""
+def get_metrics_summary(
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    """Calcula y devuelve métricas consolidadas para el Supervisor de Obra (Autenticado)"""
     total = db.query(Incident).count()
 
     today_start = datetime.combine(get_lima_now().date(), datetime.min.time())
