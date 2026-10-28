@@ -17,6 +17,11 @@ from app.api.deps import get_current_user, get_current_user_from_token
 
 router = APIRouter(prefix="/stream", tags=["Streaming y Control de Video"])
 
+# Caché en memoria para escaneo de cámaras web (evita accesos concurrentes destructivos a DSHOW)
+_CAMERAS_CACHE: Optional[List[dict]] = None
+_CAMERAS_CACHE_TIME: float = 0.0
+_CAMERAS_CACHE_TTL: float = 30.0  # 30 segundos
+
 class StartStreamRequest(BaseModel):
     source_type: str  # "camera" o "file"
     camera_index: Optional[int] = 0
@@ -72,11 +77,29 @@ async def video_feed(
 
 @router.get("/cameras")
 def get_connected_cameras(current_user: User = Depends(get_current_user)):
-    """Escanea y detecta las cámaras web físicas conectadas al equipo (Autenticado)"""
+    """Escanea y detecta las cámaras web físicas conectadas al equipo (Autenticado y con caché de 30s)"""
+    global _CAMERAS_CACHE, _CAMERAS_CACHE_TIME
+
+    now = time.time()
+    if _CAMERAS_CACHE is not None and (now - _CAMERAS_CACHE_TIME) < _CAMERAS_CACHE_TTL:
+        return _CAMERAS_CACHE
+
     available_cameras = []
-    
-    # Escanear índices 0 a 3 rápidamente
+    active_cam_idx: Optional[int] = None
+
+    # Si el motor está activo usando una cámara física, incluirla directamente sin reabrirla
+    if video_engine.is_running and isinstance(video_engine.current_source, int):
+        active_cam_idx = video_engine.current_source
+        available_cameras.append({
+            "id": f"cam_{active_cam_idx}",
+            "index": active_cam_idx,
+            "name": f"Cámara {active_cam_idx}" + (" (Principal)" if active_cam_idx == 0 else "")
+        })
+
+    # Escanear índices 0 a 3 rápidamente omitiendo la cámara en uso activo
     for idx in range(4):
+        if idx == active_cam_idx:
+            continue
         cap = cv2.VideoCapture(idx, cv2.CAP_DSHOW)
         if cap.isOpened():
             ret, _ = cap.read()
@@ -87,8 +110,8 @@ def get_connected_cameras(current_user: User = Depends(get_current_user)):
                     "name": f"Cámara {idx}" + (" (Principal)" if idx == 0 else "")
                 })
             cap.release()
-            
-    # Si no detectó por DSHOW, probar fallback genérico
+
+    # Si no detectó por DSHOW y tampoco había cámara activa, probar fallback genérico
     if not available_cameras:
         cap = cv2.VideoCapture(0)
         if cap.isOpened():
@@ -99,6 +122,11 @@ def get_connected_cameras(current_user: User = Depends(get_current_user)):
             })
             cap.release()
 
+    # Ordenar cámaras por índice para consistencia
+    available_cameras.sort(key=lambda c: c["index"])
+
+    _CAMERAS_CACHE = available_cameras
+    _CAMERAS_CACHE_TIME = now
     return available_cameras
 
 @router.post("/upload_video")
