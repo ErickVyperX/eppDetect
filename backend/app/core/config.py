@@ -66,10 +66,17 @@ class Settings:
     # YOLO & Tracking (ubicado en D:\PROYECTO-YOLO\PPE_PROYECTO-1\eppDetect\weights_yolov26s_v1.pt)
     MODEL_PATH: str = str(PROJECT_ROOT / "weights_yolov26s_v1.2.pt")
     
+    # Rastreador multi-objeto (BoT-SORT por defecto o ByteTrack)
+    TRACKER_CONFIG: str = os.getenv("TRACKER_CONFIG", "botsort.yaml")
+
+    # Parámetros de captura de video de cámara web en Windows
+    CAMERA_WIDTH: int = int(os.getenv("CAMERA_WIDTH", "2160"))
+    CAMERA_HEIGHT: int = int(os.getenv("CAMERA_HEIGHT", "1440"))
+
     # Regla de Negocio: Cooldown de 60 segundos por trabajador/infracción
     INCIDENT_COOLDOWN_SECONDS: float = float(os.getenv("INCIDENT_COOLDOWN_SECONDS", "60.0"))
     
     # Confidence threshold
-    CONF_THRESHOLD: float = float(os.getenv("CONF_THRESHOLD", "0.50"))
+    CONF_THRESHOLD: float = float(os.getenv("CONF_THRESHOLD", "0.55"))
 
 settings = Settings()
