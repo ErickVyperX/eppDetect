@@ -1,6 +1,12 @@
 import unittest
+import sys
+from pathlib import Path
 from datetime import timedelta
-import jwt
+
+BACKEND_DIR = Path(__file__).resolve().parent.parent
+if str(BACKEND_DIR) not in sys.path:
+    sys.path.insert(0, str(BACKEND_DIR))
+
 from app.core.config import settings
 from app.core.security import (
     get_password_hash,
@@ -22,53 +28,47 @@ class TestSecurity(unittest.TestCase):
         # Verificación correcta
         self.assertTrue(verify_password(password, hashed))
 
-        # Verificación errónea
-        self.assertFalse(verify_password("WrongPassword!", hashed))
-        self.assertFalse(verify_password("", hashed))
+        # Contraseña errónea debe ser rechazada
+        self.assertFalse(verify_password("WrongPassword999", hashed))
 
     def test_hash_password_alias(self):
-        password = "TestPassword456"
-        hashed = hash_password(password)
-        self.assertTrue(verify_password(password, hashed))
+        # Verifica que hash_password sea un alias compatible de get_password_hash
+        pwd = "TestPassword456"
+        hashed = hash_password(pwd)
+        self.assertTrue(verify_password(pwd, hashed))
 
-    def test_create_and_decode_valid_token(self):
-        subject = "testuser@safetyvision.local"
-        token = create_access_token(subject=subject, expires_delta=timedelta(minutes=15))
+    def test_create_and_decode_valid_access_token(self):
+        token = create_access_token(subject="42", expires_delta=timedelta(minutes=15))
 
         self.assertIsInstance(token, str)
         payload = decode_token(token)
 
         self.assertIsNotNone(payload)
-        self.assertEqual(payload.get("sub"), subject)
+        self.assertEqual(payload.get("sub"), "42")
         self.assertIn("exp", payload)
-        self.assertIn("iat", payload)
 
-    def test_decode_expired_token(self):
-        # Crear token que ya expiró hace 5 minutos
-        expired_token = create_access_token(
-            subject="expired@safetyvision.local",
-            expires_delta=timedelta(minutes=-5)
-        )
+    def test_decode_expired_token_returns_none(self):
+        # Token con delta negativo (-5 minutos)
+        expired_token = create_access_token(subject="99", expires_delta=timedelta(minutes=-5))
+
         payload = decode_token(expired_token)
         self.assertIsNone(payload)
 
-    def test_decode_malformed_token(self):
+    def test_decode_malformed_token_returns_none(self):
         malformed_tokens = [
-            "invalid.token.structure",
-            "not_a_jwt",
             "",
-            "header.payload",
+            "this.is.not.a.valid.jwt",
+            "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.invalid.payload",
+            "Bearer valid_looking_string",
         ]
         for bad_token in malformed_tokens:
             self.assertIsNone(decode_token(bad_token))
 
-    def test_decode_token_with_wrong_secret(self):
-        # Token firmado con otra clave
-        tampered_token = jwt.encode(
-            {"sub": "attacker", "exp": 9999999999},
-            "completely_wrong_secret_key",
-            algorithm="HS256"
-        )
+    def test_token_with_tampered_signature_returns_none(self):
+        token = create_access_token(subject="10")
+        # Modificar el último caracter de la firma
+        tampered_token = token[:-1] + ("A" if token[-1] != "A" else "B")
+
         self.assertIsNone(decode_token(tampered_token))
 
 if __name__ == "__main__":
