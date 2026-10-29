@@ -31,4 +31,3 @@ backend/storage/
 
 #exclude .pt files
 *.pt
-skills-lock.json

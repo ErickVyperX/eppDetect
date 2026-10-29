@@ -1,7 +1,7 @@
 import React, { useEffect, useRef } from 'react';
 import { ShieldAlert, X } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
-import { formatViolationName, formatDateTime } from '../utils/formatters';
+import { formatViolationName, formatDateTime, buildFrameUrl } from '../utils/formatters';
 
 /**
  * Modal accesible de visualización de evidencia gráfica para infracciones de EPP.
@@ -87,13 +87,6 @@ export default function EvidenceModal({ incident, onClose, triggerRef }) {
 
   if (!incident) return null;
 
-  const getFrameUrl = (url) => {
-    if (!url) return '';
-    if (!token) return url;
-    const separator = url.includes('?') ? '&' : '?';
-    return `${url}${separator}token=${encodeURIComponent(token)}`;
-  };
-
   return (
     <div 
       onClick={onClose}
@@ -133,7 +126,7 @@ export default function EvidenceModal({ incident, onClose, triggerRef }) {
 
         <div className="bg-black rounded-xl overflow-hidden border border-slate-800 max-h-[480px] flex items-center justify-center">
           <img
-            src={getFrameUrl(incident.frame_url)}
+            src={buildFrameUrl(incident.frame_url, token)}
             alt={`Evidencia fotográfica de ${formatViolationName(incident.violation_type)} en sujeto #${incident.track_id}`}
             className="max-h-[480px] w-auto object-contain"
           />

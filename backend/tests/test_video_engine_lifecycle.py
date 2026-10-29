@@ -3,7 +3,7 @@ import sys
 import threading
 import time
 from pathlib import Path
-from unittest.mock import MagicMock, patch, PropertyMock
+from unittest.mock import MagicMock, patch
 
 BACKEND_DIR = Path(__file__).resolve().parent.parent
 if str(BACKEND_DIR) not in sys.path:
@@ -11,10 +11,11 @@ if str(BACKEND_DIR) not in sys.path:
 
 import cv2
 import numpy as np
-from app.services.video_engine import VideoEngine
+from app.services.video_engine import VideoEngine, _CameraStreamReader
 from app.core.config import settings
 import app.api.stream_router as stream_module
 from app.api.stream_router import get_connected_cameras
+
 
 class TestVideoEngineLifecycle(unittest.TestCase):
     """Pruebas unitarias para el ciclo de vida del motor de video, trackers y captura."""
@@ -94,7 +95,7 @@ class TestVideoEngineLifecycle(unittest.TestCase):
         mock_thread.is_alive.return_value = True
         self.engine._thread = mock_thread
 
-        with patch.object(self.engine, "stop") as mock_stop:
+        with patch.object(self.engine, "stop"):
             # stop() es llamado pero el hilo sigue vivo
             with self.assertRaises(RuntimeError) as ctx:
                 self.engine.start(source=0)
@@ -104,7 +105,7 @@ class TestVideoEngineLifecycle(unittest.TestCase):
         """Verifica que _open_capture configure MJPG, ancho/alto, buffersize y descarte frames."""
         mock_cap = MagicMock()
         mock_cap.isOpened.return_value = True
-        test_frame = np.zeros((720, 1280, 3), dtype=np.uint8)
+        test_frame = np.zeros((480, 640, 3), dtype=np.uint8)
         mock_cap.read.return_value = (True, test_frame)
 
         with patch("cv2.VideoCapture", return_value=mock_cap) as mock_vc:
@@ -228,6 +229,41 @@ class TestVideoEngineLifecycle(unittest.TestCase):
             cams_cached = get_connected_cameras(current_user=mock_user)
             self.assertEqual(cams, cams_cached)
             mock_vc.assert_not_called()
+
+    def test_standby_frame_cached_and_packet_sequence(self):
+        """Verifica que el frame standby esté pre-cacheado y que get_latest_frame_packet controle la secuencia."""
+        jpeg_bytes, seq_initial, is_live = self.engine.get_latest_frame_packet()
+        self.assertFalse(is_live)
+        self.assertGreater(len(jpeg_bytes), 100)
+        self.assertEqual(jpeg_bytes, self.engine._standby_jpeg)
+
+        # Simular nuevo frame en vivo
+        with self.engine._lock:
+            self.engine._current_jpeg = b"fake_live_jpeg"
+            self.engine._frame_seq += 1
+
+        live_bytes, seq_live, is_live_now = self.engine.get_latest_frame_packet()
+        self.assertTrue(is_live_now)
+        self.assertEqual(live_bytes, b"fake_live_jpeg")
+        self.assertEqual(seq_live, seq_initial + 1)
+
+    def test_camera_stream_reader_delivers_latest_frame(self):
+        """Verifica que _CameraStreamReader lea asíncronamente el último fotograma disponible."""
+        mock_cap = MagicMock()
+        mock_cap.isOpened.return_value = True
+        frame = np.ones((480, 640, 3), dtype=np.uint8) * 128
+        mock_cap.read.return_value = (True, frame)
+
+        stop_ev = threading.Event()
+        reader = _CameraStreamReader(mock_cap, stop_ev)
+        try:
+            ret, captured = reader.read()
+            self.assertTrue(ret)
+            self.assertIsNotNone(captured)
+            self.assertEqual(captured.shape, (480, 640, 3))
+        finally:
+            reader.stop()
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -1,7 +1,7 @@
-from datetime import datetime, date, timedelta
+from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Optional, List
-from fastapi import APIRouter, Depends, HTTPException, Query, Header, status
+from fastapi import APIRouter, Depends, HTTPException, Query
 from fastapi.responses import FileResponse
 from sqlalchemy.orm import Session
 from sqlalchemy import func, desc
@@ -11,9 +11,10 @@ from app.domain.models import Incident, User
 from app.schemas.incident import IncidentResponse, MetricsSummary
 from app.core.config import settings
 from app.core.timezone import get_lima_now, get_lima_now_naive
-from app.api.deps import get_current_user, get_current_user_from_token
+from app.api.deps import get_current_user, get_current_user_flexible
 
 router = APIRouter(prefix="/incidents", tags=["Incidencias y Métricas"])
+
 
 @router.get("", response_model=List[IncidentResponse])
 def get_incidents(
@@ -41,29 +42,26 @@ def get_incidents(
 
     incidents = query.order_by(desc(Incident.timestamp)).offset(skip).limit(limit).all()
 
-    # Formatear respuesta con la URL relativa del frame
-    result = []
-    for inc in incidents:
-        result.append(
-            IncidentResponse(
-                id=inc.id,
-                timestamp=inc.timestamp,
-                track_id=inc.track_id,
-                violation_type=inc.violation_type,
-                confidence=inc.confidence,
-                frame_url=f"/api/incidents/{inc.id}/frame",
-                source_name=inc.source_name,
-                resolved=inc.resolved,
-                notes=inc.notes
-            )
+    return [
+        IncidentResponse(
+            id=inc.id,
+            timestamp=inc.timestamp,
+            track_id=inc.track_id,
+            violation_type=inc.violation_type,
+            confidence=inc.confidence,
+            frame_url=f"/api/incidents/{inc.id}/frame",
+            source_name=inc.source_name,
+            resolved=inc.resolved,
+            notes=inc.notes
         )
-    return result
+        for inc in incidents
+    ]
+
 
 @router.get("/{incident_id}/frame")
 def get_incident_frame(
     incident_id: str,
-    token: Optional[str] = Query(None),
-    authorization: Optional[str] = Header(None),
+    current_user: User = Depends(get_current_user_flexible),
     db: Session = Depends(get_db)
 ):
     """
@@ -71,22 +69,6 @@ def get_incident_frame(
     Acepta autenticación por cabecera Bearer o parámetro query '?token=...' para elementos <img>.
     Valida contención de ruta en el sistema de archivos (prevención de Path Traversal).
     """
-    raw_token = None
-    if authorization and authorization.startswith("Bearer "):
-        raw_token = authorization.split("Bearer ", 1)[1].strip()
-    elif token:
-        raw_token = token.strip()
-
-    if not raw_token:
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Se requiere token de autenticación para consultar la evidencia fotográfica.",
-            headers={"WWW-Authenticate": "Bearer"}
-        )
-
-    # Validar sesión y usuario activo
-    get_current_user_from_token(token=raw_token, db=db)
-
     incident = db.query(Incident).filter(Incident.id == incident_id).first()
     if not incident:
         raise HTTPException(status_code=404, detail="Incidencia no encontrada")
@@ -100,18 +82,17 @@ def get_incident_frame(
 
     return FileResponse(path=str(file_path), media_type="image/jpeg")
 
+
 @router.get("/metrics/summary", response_model=MetricsSummary)
 def get_metrics_summary(
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db)
 ):
     """Calcula y devuelve métricas consolidadas para el Supervisor de Obra (Autenticado)"""
-    total = db.query(Incident).count()
-
     today_start = datetime.combine(get_lima_now().date(), datetime.min.time())
-    today_count = db.query(Incident).filter(Incident.timestamp >= today_start).count()
+    today_count = db.query(func.count(Incident.id)).filter(Incident.timestamp >= today_start).scalar() or 0
 
-    # Agrupación por tipo de EPP ausente
+    # Agrupación por tipo de EPP ausente (su suma provee también el total histórico sin query extra)
     counts_by_type = (
         db.query(Incident.violation_type, func.count(Incident.id))
         .group_by(Incident.violation_type)
@@ -125,20 +106,22 @@ def get_metrics_summary(
     }
     top_violation = None
     max_count = -1
+    total = 0
 
     for v_type, count in counts_by_type:
+        total += count
         violations_map[v_type] = count
         if count > max_count:
             max_count = count
             top_violation = v_type
 
-    # Distribución cronológica continua de las últimas 24 horas (#397)
+    # Distribución cronológica continua de las últimas 24 horas (#397) consultando solo la columna timestamp
     now = get_lima_now_naive()
     current_hour_start = now.replace(minute=0, second=0, microsecond=0)
     start_time = current_hour_start - timedelta(hours=23)
 
-    recent_incidents = (
-        db.query(Incident)
+    recent_timestamps = (
+        db.query(Incident.timestamp)
         .filter(Incident.timestamp >= start_time)
         .all()
     )
@@ -153,10 +136,11 @@ def get_metrics_summary(
         hourly_slots.append((slot_key, slot_label))
         slot_counts[slot_key] = 0
 
-    for inc in recent_incidents:
-        inc_key = inc.timestamp.strftime("%Y-%m-%d %H")
-        if inc_key in slot_counts:
-            slot_counts[inc_key] += 1
+    for (ts,) in recent_timestamps:
+        if ts:
+            inc_key = ts.strftime("%Y-%m-%d %H")
+            if inc_key in slot_counts:
+                slot_counts[inc_key] += 1
 
     hourly_distribution = [
         {"hora": label, "infracciones": slot_counts[key]}

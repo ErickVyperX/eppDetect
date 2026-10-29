@@ -1,4 +1,5 @@
-from fastapi import Depends, HTTPException, status
+from typing import Optional
+from fastapi import Depends, HTTPException, Query, Header, status
 from fastapi.security import OAuth2PasswordBearer
 from sqlalchemy.orm import Session
 from app.database import get_db
@@ -46,6 +47,30 @@ def get_current_user_from_token(token: str, db: Session) -> User:
 def get_current_user(token: str = Depends(oauth2_scheme), db: Session = Depends(get_db)) -> User:
     """Dependencia estándar OAuth2 Bearer para protección de endpoints REST"""
     return get_current_user_from_token(token=token, db=db)
+
+def get_current_user_flexible(
+    token: Optional[str] = Query(None),
+    authorization: Optional[str] = Header(None),
+    db: Session = Depends(get_db)
+) -> User:
+    """
+    Dependencia unificada para recursos multimedia (MJPEG y evidencias en etiquetas <img>)
+    que permite autenticar mediante cabecera 'Authorization: Bearer ...' o query '?token=...'.
+    """
+    raw_token = None
+    if authorization and authorization.startswith("Bearer "):
+        raw_token = authorization.split("Bearer ", 1)[1].strip()
+    elif token:
+        raw_token = token.strip()
+
+    if not raw_token:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Se requiere token de autenticación para acceder a este recurso.",
+            headers={"WWW-Authenticate": "Bearer"}
+        )
+
+    return get_current_user_from_token(token=raw_token, db=db)
 
 def require_admin(current_user: User = Depends(get_current_user)) -> User:
     """Dependencia RBAC que restringe el acceso exclusivamente a usuarios con rol 'admin'"""

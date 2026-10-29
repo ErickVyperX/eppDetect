@@ -1,4 +1,3 @@
-import asyncio
 from typing import Optional
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect, Query, Depends, status
 from sqlalchemy.orm import Session
@@ -9,6 +8,7 @@ from app.database import get_db
 from app.api.deps import get_current_user_from_token
 
 router = APIRouter(tags=["WebSockets"])
+
 
 @router.websocket("/ws/alerts")
 async def websocket_alerts_endpoint(
@@ -51,7 +51,7 @@ async def websocket_alerts_endpoint(
             "type": "connected",
             "message": "Conexión en tiempo real activa con el servidor de detección EPP"
         })
-        
+
         while True:
             # Mantener la conexión abierta y responder a posibles pings del cliente
             data = await websocket.receive_text()

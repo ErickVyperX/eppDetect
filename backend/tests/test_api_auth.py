@@ -1,16 +1,18 @@
 import unittest
 import sys
 from pathlib import Path
+from unittest.mock import patch, MagicMock
 from fastapi import HTTPException
 
 BACKEND_DIR = Path(__file__).resolve().parent.parent
 if str(BACKEND_DIR) not in sys.path:
     sys.path.insert(0, str(BACKEND_DIR))
 
-from app.api.deps import get_current_user_from_token
+from app.api.deps import get_current_user_from_token, get_current_user_flexible
 from app.api.incidents_router import router as inc_router
 from app.api.stream_router import router as st_router
 from main import app
+
 
 class TestAPIAuthAndFallback(unittest.TestCase):
     def test_auth_without_token_raises_401(self):
@@ -28,6 +30,30 @@ class TestAPIAuthAndFallback(unittest.TestCase):
         with self.assertRaises(HTTPException) as ctx:
             get_current_user_from_token(token="invalid_token_12345", db=None)
         self.assertEqual(ctx.exception.status_code, 401)
+
+    def test_flexible_auth_dependency_header_and_query(self):
+        """Verifica que get_current_user_flexible extraiga token de Header Bearer o Query param."""
+        with self.assertRaises(HTTPException) as ctx:
+            get_current_user_flexible(token=None, authorization=None, db=None)
+        self.assertEqual(ctx.exception.status_code, 401)
+
+        mock_user = MagicMock()
+        with patch("app.api.deps.get_current_user_from_token", return_value=mock_user) as mock_verify:
+            res_header = get_current_user_flexible(
+                token=None,
+                authorization="Bearer token_desde_header",
+                db=None
+            )
+            self.assertEqual(res_header, mock_user)
+            mock_verify.assert_called_with(token="token_desde_header", db=None)
+
+            res_query = get_current_user_flexible(
+                token="token_desde_query",
+                authorization=None,
+                db=None
+            )
+            self.assertEqual(res_query, mock_user)
+            mock_verify.assert_called_with(token="token_desde_query", db=None)
 
     def test_spa_fallback_rule(self):
         """Verifica que las rutas bajo /api/ o /ws/ sean reconocidas como no elegibles para SPA index.html"""
@@ -51,8 +77,11 @@ class TestAPIAuthAndFallback(unittest.TestCase):
 
         self.assertIn("get_current_user", inc_deps.get("/incidents", []))
         self.assertIn("get_current_user", inc_deps.get("/incidents/metrics/summary", []))
+        self.assertIn("get_current_user_flexible", inc_deps.get("/incidents/{incident_id}/frame", []))
         self.assertIn("get_current_user", st_deps.get("/stream/status", []))
         self.assertIn("get_current_user", st_deps.get("/stream/start", []))
+        self.assertIn("get_current_user_flexible", st_deps.get("/stream/video_feed", []))
+
 
 if __name__ == "__main__":
     unittest.main()

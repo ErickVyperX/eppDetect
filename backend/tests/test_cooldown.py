@@ -1,5 +1,4 @@
 import unittest
-import time
 import sys
 from pathlib import Path
 
@@ -8,6 +7,7 @@ if str(BACKEND_DIR) not in sys.path:
     sys.path.insert(0, str(BACKEND_DIR))
 
 from app.services.cooldown_manager import CooldownManager, cooldown_manager
+
 
 class TestCooldownManager(unittest.TestCase):
     def setUp(self):
@@ -71,6 +71,7 @@ class TestCooldownManager(unittest.TestCase):
         # Limpiar con tiempo mayor al timeout (180s)
         self.manager.clean_old_tracks(current_time=t0 + 200.0)
         self.assertNotIn(key, self.manager._tracks)
+
 
 if __name__ == "__main__":
     unittest.main()

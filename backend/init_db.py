@@ -6,8 +6,9 @@ current_dir = Path(__file__).resolve().parent
 sys.path.insert(0, str(current_dir))
 
 from app.database import engine, SessionLocal, Base
-from app.domain.models import User, Incident
+from app.domain.models import User, Incident  # noqa: F401 - registra tablas en Base.metadata
 from app.core.security import hash_password
+
 
 def init_database():
     print("[DB Init] Creando tablas en la base de datos SQLite...")
@@ -56,6 +57,7 @@ def init_database():
         print(f"[DB Init] Error durante la inicialización: {e}")
     finally:
         db.close()
+
 
 if __name__ == "__main__":
     init_database()

@@ -13,10 +13,17 @@ export default defineConfig({
       '/ws': {
         target: 'ws://127.0.0.1:8000',
         ws: true
-      },
-      '/static': {
-        target: 'http://127.0.0.1:8000',
-        changeOrigin: true
+      }
+    }
+  },
+  build: {
+    rollupOptions: {
+      output: {
+        manualChunks: {
+          'vendor-react': ['react', 'react-dom'],
+          'vendor-charts': ['recharts'],
+          'vendor-icons': ['lucide-react']
+        }
       }
     }
   }

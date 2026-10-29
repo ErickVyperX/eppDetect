@@ -7,7 +7,6 @@ BACKEND_DIR = Path(__file__).resolve().parent.parent
 if str(BACKEND_DIR) not in sys.path:
     sys.path.insert(0, str(BACKEND_DIR))
 
-from app.core.config import settings
 from app.core.security import (
     get_password_hash,
     hash_password,
@@ -15,6 +14,7 @@ from app.core.security import (
     create_access_token,
     decode_token,
 )
+
 
 class TestSecurity(unittest.TestCase):
     def test_password_hashing_and_verification(self):
@@ -70,6 +70,7 @@ class TestSecurity(unittest.TestCase):
         tampered_token = token[:-1] + ("A" if token[-1] != "A" else "B")
 
         self.assertIsNone(decode_token(tampered_token))
+
 
 if __name__ == "__main__":
     unittest.main()

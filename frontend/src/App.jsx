@@ -148,7 +148,6 @@ export default function App() {
           <MonitoringView 
             alertQueue={alertQueue}
             onConsumeAlerts={handleConsumeAlerts}
-            latestAlert={alertQueue.length > 0 ? alertQueue[alertQueue.length - 1] : null}
             isActive={activeTab === 'monitoring'}
           />
         </div>

@@ -1,11 +1,9 @@
 import React, { useState } from 'react';
 import { useAuth } from '../context/AuthContext';
 import { 
-  ShieldAlert, 
   Lock, 
   Mail, 
   AlertCircle, 
-  CheckCircle2, 
   HardHat, 
   HelpCircle,
   KeyRound,
