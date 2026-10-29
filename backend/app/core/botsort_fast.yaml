@@ -1,0 +1,20 @@
+# Configuración optimizada de BoT-SORT para cámaras de supervisión fija / monitoreo EPP
+# Desactiva el cálculo pesado de flujo óptico global (sparseOptFlow) en CPU manteniendo
+# el filtro de Kalman completo de 8 estados y la fusión de confianza de BoT-SORT.
+
+tracker_type: botsort
+track_high_thresh: 0.25
+track_low_thresh: 0.1
+new_track_thresh: 0.25
+track_buffer: 30
+match_thresh: 0.8
+fuse_score: True
+
+# Compensación de movimiento global desactivada para maximizar FPS en cámaras fijas
+gmc_method: none
+
+# Parámetros ReID (desactivado para inferencia en tiempo real de baja latencia)
+proximity_thresh: 0.5
+appearance_thresh: 0.8
+with_reid: False
+model: auto

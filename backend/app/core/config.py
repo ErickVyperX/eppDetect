@@ -2,15 +2,12 @@ import os
 import secrets
 from pathlib import Path
 
-# Cargar variables de entorno desde .env si existe
+# Cargar variables de entorno desde el .env en la raíz del proyecto si existe
 try:
     from dotenv import load_dotenv
-    _backend_dir = Path(__file__).resolve().parent.parent.parent
-    _env_backend = _backend_dir / ".env"
-    _env_root = _backend_dir.parent / ".env"
-    if _env_backend.is_file():
-        load_dotenv(_env_backend)
-    elif _env_root.is_file():
+    _project_root = Path(__file__).resolve().parent.parent.parent.parent
+    _env_root = _project_root / ".env"
+    if _env_root.is_file():
         load_dotenv(_env_root)
     else:
         load_dotenv()
@@ -24,6 +21,7 @@ STORAGE_DIR = BACKEND_DIR / "storage"
 INCIDENTS_STORAGE_DIR = STORAGE_DIR / "incidents"
 UPLOADED_VIDEOS_DIR = STORAGE_DIR / "uploaded_videos"
 DB_PATH = BACKEND_DIR / "epp_database.db"
+DEFAULT_TRACKER_PATH = Path(__file__).resolve().parent / "botsort_fast.yaml"
 
 # Asegurar existencia de directorios de almacenamiento
 INCIDENTS_STORAGE_DIR.mkdir(parents=True, exist_ok=True)
@@ -63,15 +61,21 @@ class Settings:
     # Base de Datos SQLite Local
     DATABASE_URL: str = f"sqlite:///{DB_PATH.as_posix()}"
     
-    # YOLO & Tracking (ubicado en D:\PROYECTO-YOLO\PPE_PROYECTO-1\eppDetect\weights_yolov26s_v1.pt)
+    # YOLO & Tracking (ubicado en D:\PROYECTO-YOLO\PPE_PROYECTO-1\eppDetect\weights_yolov26s_v1.2.pt)
     MODEL_PATH: str = str(PROJECT_ROOT / "weights_yolov26s_v1.2.pt")
     
-    # Rastreador multi-objeto (BoT-SORT por defecto o ByteTrack)
-    TRACKER_CONFIG: str = os.getenv("TRACKER_CONFIG", "botsort.yaml")
+    # Rastreador multi-objeto: usa BoT-SORT optimizado (sin Optical Flow pesado) por defecto
+    TRACKER_CONFIG: str = os.getenv(
+        "TRACKER_CONFIG",
+        str(DEFAULT_TRACKER_PATH) if DEFAULT_TRACKER_PATH.is_file() else "botsort.yaml"
+    )
 
-    # Parámetros de captura de video de cámara web en Windows
-    CAMERA_WIDTH: int = int(os.getenv("CAMERA_WIDTH", "2160"))
-    CAMERA_HEIGHT: int = int(os.getenv("CAMERA_HEIGHT", "1440"))
+    # Tamaño de imagen de entrada para inferencia YOLO (512 equilibra precisión de EPP y ~22+ FPS en CPU)
+    INFERENCE_IMGSZ: int = int(os.getenv("INFERENCE_IMGSZ", "512"))
+
+    # Parámetros de captura de video de cámara web en Windows (640x480 maximiza FPS de cámara USB)
+    CAMERA_WIDTH: int = int(os.getenv("CAMERA_WIDTH", "1280"))
+    CAMERA_HEIGHT: int = int(os.getenv("CAMERA_HEIGHT", "720"))
 
     # Regla de Negocio: Cooldown de 60 segundos por trabajador/infracción
     INCIDENT_COOLDOWN_SECONDS: float = float(os.getenv("INCIDENT_COOLDOWN_SECONDS", "60.0"))

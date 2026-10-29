@@ -2,6 +2,7 @@ from pydantic import BaseModel, ConfigDict
 from datetime import datetime
 from typing import Optional, List, Dict
 
+
 class IncidentResponse(BaseModel):
     id: str
     timestamp: datetime
@@ -15,11 +16,13 @@ class IncidentResponse(BaseModel):
 
     model_config = ConfigDict(from_attributes=True)
 
+
 class ViolationCount(BaseModel):
     violation_type: str
     count: int
 
     model_config = ConfigDict(from_attributes=True)
+
 
 class MetricsSummary(BaseModel):
     total_incidents: int
@@ -27,10 +30,3 @@ class MetricsSummary(BaseModel):
     violations_by_type: Dict[str, int]
     top_violation: Optional[str]
     hourly_distribution: List[Dict[str, int | str]]
-
-class VideoSourceInfo(BaseModel):
-    id: str
-    name: str
-    source_type: str  # 'webcam' o 'video_file'
-    path_or_index: str | int
-    is_active: bool

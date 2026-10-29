@@ -1,6 +1,20 @@
 /**
- * Utilidades de formateo para EPP SafetyVision.
+ * Utilidades de formateo y construcción de URLs para EPP SafetyVision.
  */
+
+/**
+ * Construye una URL autenticada con token JWT como query param para recursos multimedia (<img>).
+ *
+ * @param {string} url - URL relativa del recurso
+ * @param {string} token - Token JWT de sesión
+ * @returns {string} URL con parámetro token anexado
+ */
+export function buildFrameUrl(url, token) {
+  if (!url) return '';
+  if (!token) return url;
+  const separator = url.includes('?') ? '&' : '?';
+  return `${url}${separator}token=${encodeURIComponent(token)}`;
+}
 
 /**
  * Traduce el identificador técnico de la infracción a una denominación

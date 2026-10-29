@@ -1,8 +1,8 @@
 import sqlite3
 from pathlib import Path
-from datetime import datetime
 
 DB_PATH = Path(__file__).resolve().parent / "epp_database.db"
+
 
 def consultar():
     if not DB_PATH.exists():
@@ -56,6 +56,7 @@ def consultar():
 
     print("\n" + "=" * 70)
     conn.close()
+
 
 if __name__ == "__main__":
     consultar()

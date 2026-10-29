@@ -229,9 +229,7 @@ Los parámetros operativos del sistema se centralizan en la clase `Settings` den
 ```text
 eppDetect/
 ├── .env.example             # Plantilla de variables de entorno y seguridad
-├── .flake8                  # Configuración de linter Flake8
 ├── .gitignore               # Reglas de exclusión (ignora .pt, .venv, bases de datos y dist)
-├── predictions.py           # Script independiente de prueba rápida del modelo con webcam
 ├── README.md                # Documentación principal del repositorio
 ├── requirements.txt         # Dependencias exactas de Python del proyecto completo
 ├── ruff.toml                # Configuración de linter y formateador Ruff
@@ -239,22 +237,22 @@ eppDetect/
 ├── weights_yolov26m_v1.3.pt # Pesos alternativos medianos (desindexado de Git, preservado local)
 ├── backend/
 │   ├── app/
-│   │   ├── api/             # Enrutadores REST y WebSocket (auth, stream, incidents, ws)
-│   │   ├── core/            # Configuración, seguridad (bcrypt/JWT), mitigación timing y zona horaria
+│   │   ├── api/             # Enrutadores REST, WebSocket y dependencias (auth, stream, incidents, ws, deps)
+│   │   ├── core/            # Configuración, seguridad (bcrypt/JWT), botsort_fast.yaml y zona horaria
 │   │   ├── domain/          # Modelos de datos SQLAlchemy (User, Incident)
 │   │   ├── schemas/         # Modelos Pydantic para validación rigurosa de requests/responses
 │   │   ├── services/        # VideoEngine, CooldownManager, StorageService, WSManager
 │   │   └── database.py      # Conexión a SQLite y configuración de motor WAL
 │   ├── storage/             # Evidencias fotográficas (.jpg) y videos subidos (en runtime)
-│   ├── tests/               # Suite de 20 pruebas unitarias automatizadas con unittest
+│   ├── tests/               # Suite de 30 pruebas unitarias automatizadas con unittest
 │   │   ├── test_api_auth.py # Pruebas de protección de rutas y cabeceras de seguridad
 │   │   ├── test_cooldown.py # Pruebas unitarias de CooldownManager y supresión 60 s
 │   │   ├── test_schemas.py  # Validación de modelos Pydantic y serialización
-│   │   └── test_security.py # Pruebas de hashing bcrypt, firma y expiración JWT
+│   │   ├── test_security.py # Pruebas de hashing bcrypt, firma y expiración JWT
+│   │   └── test_video_engine_lifecycle.py # Pruebas de ciclo de vida del motor de video y cámara
 │   ├── consultar_bd.py      # Utilidad CLI para inspeccionar usuarios e incidentes en SQLite
 │   ├── init_db.py           # Script para crear tablas y sembrar usuarios iniciales
-│   ├── main.py              # Punto de entrada FastAPI, ciclo de vida, middlewares y montaje de SPA
-│   └── requirements.txt     # Espejo de dependencias de backend
+│   └── main.py              # Punto de entrada FastAPI, ciclo de vida, middlewares y montaje de SPA
 ├── frontend/
 │   ├── src/
 │   │   ├── components/      # Componentes de UI accesibles (Navbar, Select, DatePicker, EvidenceModal)

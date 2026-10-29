@@ -4,16 +4,14 @@ import uuid
 import asyncio
 from pathlib import Path
 from typing import List, Optional
-from fastapi import APIRouter, HTTPException, UploadFile, File, Form, Depends, Query, Header, status
+from fastapi import APIRouter, HTTPException, UploadFile, File, Depends, Query, status
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
-from sqlalchemy.orm import Session
 
 from app.services.video_engine import video_engine
 from app.core.config import settings
 from app.domain.models import User
-from app.database import get_db
-from app.api.deps import get_current_user, get_current_user_from_token
+from app.api.deps import get_current_user, get_current_user_flexible
 
 router = APIRouter(prefix="/stream", tags=["Streaming y Control de Video"])
 
@@ -22,49 +20,56 @@ _CAMERAS_CACHE: Optional[List[dict]] = None
 _CAMERAS_CACHE_TIME: float = 0.0
 _CAMERAS_CACHE_TTL: float = 30.0  # 30 segundos
 
+
 class StartStreamRequest(BaseModel):
     source_type: str  # "camera" o "file"
     camera_index: Optional[int] = 0
     file_path: Optional[str] = None
     name: Optional[str] = "Entrada de Video"
 
+
 async def generate_frames():
-    """Generador continuo asíncrono de frames MJPEG codificados para el navegador web (#393)"""
+    """
+    Generador continuo asíncrono de frames MJPEG codificados para el navegador web (#393).
+    Evita re-enviar fotogramas duplicados comprobando el número de secuencia del motor.
+    """
+    last_sent_seq: int = -1
+    last_send_time: float = 0.0
+
     while True:
-        frame_bytes = video_engine.get_latest_jpeg()
-        if frame_bytes is not None:
-            yield (b'--frame\r\n'
-                   b'Content-Type: image/jpeg\r\n\r\n' + frame_bytes + b'\r\n')
-            await asyncio.sleep(0.033)  # ~30 FPS máximo de refresco en streaming sin agotar threadpool
+        frame_bytes, frame_seq, is_live = video_engine.get_latest_frame_packet()
+        now = time.time()
+
+        # Enviar inmediatamente si hay un fotograma nuevo, si es el primer frame de la conexión,
+        # o cada 1.0s en modo standby como latido de mantenimiento de la conexión MJPEG.
+        should_send = (
+            frame_seq != last_sent_seq
+            or last_sent_seq == -1
+            or (not is_live and (now - last_send_time) >= 1.0)
+        )
+
+        if frame_bytes and should_send:
+            last_sent_seq = frame_seq
+            last_send_time = now
+            yield (
+                b'--frame\r\n'
+                b'Content-Type: image/jpeg\r\n\r\n' + frame_bytes + b'\r\n'
+            )
+            await asyncio.sleep(0.015 if is_live else 0.2)
         else:
-            await asyncio.sleep(0.05)
+            await asyncio.sleep(0.015 if is_live else 0.1)
+
 
 @router.get("/video_feed")
 async def video_feed(
-    token: Optional[str] = Query(None),
     stream_id: Optional[str] = Query(None),
-    authorization: Optional[str] = Header(None),
-    db: Session = Depends(get_db)
+    current_user: User = Depends(get_current_user_flexible)
 ):
     """
     Transmite el video procesado en tiempo real en formato MJPEG.
     Requiere autenticación válida vía cabecera Bearer o parámetro query ?token=...
     """
-    raw_token = None
-    if authorization and authorization.startswith("Bearer "):
-        raw_token = authorization.split("Bearer ", 1)[1].strip()
-    elif token:
-        raw_token = token.strip()
-
-    if not raw_token:
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Se requiere token de autenticación para acceder a la transmisión de video.",
-            headers={"WWW-Authenticate": "Bearer"}
-        )
-
-    get_current_user_from_token(token=raw_token, db=db)
-
+    _ = stream_id  # Identificador de sesión para invalidación de caché en el cliente
     return StreamingResponse(
         generate_frames(),
         media_type="multipart/x-mixed-replace; boundary=frame",
@@ -74,6 +79,7 @@ async def video_feed(
             "Expires": "0"
         }
     )
+
 
 @router.get("/cameras")
 def get_connected_cameras(current_user: User = Depends(get_current_user)):
@@ -129,6 +135,7 @@ def get_connected_cameras(current_user: User = Depends(get_current_user)):
     _CAMERAS_CACHE_TIME = now
     return available_cameras
 
+
 @router.post("/upload_video")
 async def upload_video_file(
     file: UploadFile = File(...),
@@ -145,7 +152,7 @@ async def upload_video_file(
     ext = Path(file.filename).suffix.lower()
     if ext not in settings.ALLOWED_VIDEO_EXTENSIONS:
         raise HTTPException(
-            status_code=400, 
+            status_code=400,
             detail=f"Formato de video '{ext}' no permitido. Formatos aceptados: {', '.join(sorted(settings.ALLOWED_VIDEO_EXTENSIONS))}"
         )
 
@@ -187,8 +194,9 @@ async def upload_video_file(
         "success": True,
         "filename": safe_filename,
         "file_path": safe_filename,
-        "message": f"Archivo de video verificado y preparado para procesamiento."
+        "message": "Archivo de video verificado y preparado para procesamiento."
     }
+
 
 @router.post("/start")
 def start_stream(
@@ -207,13 +215,13 @@ def start_stream(
         elif payload.source_type == "file":
             if not payload.file_path:
                 raise HTTPException(status_code=400, detail="Ruta o nombre de archivo de video no especificado.")
-            
+
             clean_filename = Path(payload.file_path).name
             target_path = (settings.UPLOADED_VIDEOS_DIR / clean_filename).resolve()
 
             if not target_path.is_file() or not target_path.is_relative_to(settings.UPLOADED_VIDEOS_DIR.resolve()):
                 raise HTTPException(status_code=400, detail="Archivo de video no encontrado o no autorizado.")
-            
+
             source_val = str(target_path)
             name = payload.name or target_path.name
         else:
@@ -238,6 +246,7 @@ def start_stream(
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Error al iniciar monitoreo: {str(e)}")
 
+
 @router.post("/stop")
 def stop_stream(current_user: User = Depends(get_current_user)):
     """Detiene el procesamiento del video y libera la cámara/archivo (Autenticado)"""
@@ -250,6 +259,7 @@ def stop_stream(current_user: User = Depends(get_current_user)):
         }
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Error al detener monitoreo: {str(e)}")
+
 
 @router.get("/status")
 def get_stream_status(current_user: User = Depends(get_current_user)):
