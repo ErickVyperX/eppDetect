@@ -1,8 +1,9 @@
+--extra-index-url https://download.pytorch.org/whl/cu128
 fastapi==0.142.4
 uvicorn[standard]==0.54.0
 ultralytics==8.4.174
-torch==2.14.1
-torchvision==0.29.1
+torch==2.11.0+cu128
+torchvision==0.26.0+cu128
 opencv-python==5.0.0.93
 SQLAlchemy==2.1.4
 bcrypt==5.0.0
@@ -10,6 +11,6 @@ PyJWT==2.15.1
 python-multipart==0.0.32
 pydantic==2.13.5
 websockets==17.2
-numpy==2.5.3
+numpy==2.5.4
 lap==0.5.13
 scipy==1.18.1

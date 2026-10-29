@@ -112,6 +112,7 @@ class VideoEngine:
 
         # Configuración de aceleración por hardware y control de logs
         self._use_half: bool = False
+        self._device: str = "cpu"
         self._last_track_error_time: float = 0.0
 
     @property
@@ -136,7 +137,13 @@ class VideoEngine:
             logger.info(f"Cargando modelo YOLO desde: {model_file}")
             self.model = YOLO(model_file)
             self._use_half = torch.cuda.is_available()
-            logger.info(f"Modelo cargado con éxito. Clases: {self.model.names} | CUDA FP16: {self._use_half}")
+            self._device = "cuda:0" if self._use_half else "cpu"
+            hw_label = torch.cuda.get_device_name(0) if self._use_half else "CPU"
+            logger.info(
+                f"Modelo cargado con éxito. Dispositivo: {self._device} ({hw_label}) | "
+                f"CUDA FP16: {self._use_half} | Clases: {self.model.names}"
+            )
+
             try:
                 # Warmup con fotograma negro al tamaño de inferencia configurado
                 imgsz = settings.INFERENCE_IMGSZ
@@ -144,6 +151,7 @@ class VideoEngine:
                 self.model.predict(
                     dummy_frame,
                     imgsz=imgsz,
+                    device=self._device,
                     quantize=16 if self._use_half else None,
                     verbose=False
                 )
@@ -291,6 +299,8 @@ class VideoEngine:
                     cap.set(cv2.CAP_PROP_FOURCC, cv2.VideoWriter_fourcc(*'MJPG'))
                     cap.set(cv2.CAP_PROP_FRAME_WIDTH, settings.CAMERA_WIDTH)
                     cap.set(cv2.CAP_PROP_FRAME_HEIGHT, settings.CAMERA_HEIGHT)
+                    # Reafirmar FOURCC MJPG después de cambiar resolución (OpenCV en Windows resetea a YUY2 al cambiar WIDTH/HEIGHT)
+                    cap.set(cv2.CAP_PROP_FOURCC, cv2.VideoWriter_fourcc(*'MJPG'))
                     cap.set(cv2.CAP_PROP_FPS, 30)
                     cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)
 
@@ -327,6 +337,7 @@ class VideoEngine:
                 tracker=settings.TRACKER_CONFIG,
                 conf=settings.CONF_THRESHOLD,
                 imgsz=settings.INFERENCE_IMGSZ,
+                device=self._device,
                 quantize=quantize_mode,
                 verbose=False
             )
@@ -340,6 +351,7 @@ class VideoEngine:
                     frame,
                     conf=settings.CONF_THRESHOLD,
                     imgsz=settings.INFERENCE_IMGSZ,
+                device=self._device,
                     quantize=quantize_mode,
                     verbose=False
                 )
@@ -503,6 +515,8 @@ class VideoEngine:
         """Bucle principal de procesamiento de frames, inferencia con tracker y reglas de negocio (#386-#392)"""
         fps_timer = time.time()
         frame_counter = 0
+        infer_time_accum = 0.0
+        logged_first_telemetry = False
         consecutive_read_failures = 0
         reopened_already = False
         is_camera_source = isinstance(self.current_source, int)
@@ -565,7 +579,9 @@ class VideoEngine:
                 now = time.time()
 
                 # 1. Inferencia y tracking
+                t_inf0 = time.perf_counter()
                 results = self._run_inference(frame)
+                infer_time_accum += (time.perf_counter() - t_inf0)
 
                 # 2. Dibujo in-place y extracción de telemetría
                 pending_incidents, violations_in_frame, tracks_in_frame = self._annotate_and_extract(frame, results)
@@ -577,6 +593,15 @@ class VideoEngine:
                 elapsed_fps = time.time() - fps_timer
                 if elapsed_fps >= 1.0:
                     self.current_fps = round(frame_counter / elapsed_fps, 1)
+                    if not logged_first_telemetry and frame_counter > 0:
+                        avg_inf_ms = (infer_time_accum / frame_counter) * 1000.0
+                        gpu_max_fps = 1000.0 / max(avg_inf_ms, 0.1)
+                        logger.info(
+                            f"Telemetría activa -> Inferencia {self._device}: {avg_inf_ms:.1f} ms/frame "
+                            f"(capacidad IA: ~{gpu_max_fps:.0f} FPS) | Tasa de entrega de fuente de video: {self.current_fps} FPS"
+                        )
+                        logged_first_telemetry = True
+                    infer_time_accum = 0.0
                     frame_counter = 0
                     fps_timer = time.time()
 

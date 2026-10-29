@@ -1,4 +1,6 @@
 import sys
+import logging
+import torch
 import asyncio
 from pathlib import Path
 from contextlib import asynccontextmanager
@@ -20,12 +22,18 @@ from app.api.stream_router import router as stream_router
 from app.api.incidents_router import router as incidents_router
 from app.api.ws_router import router as ws_router
 
+# Configurar nivel de logging INFO para mostrar telemetría del motor de video y GPU
+logging.basicConfig(level=logging.INFO, format="%(levelname)s:     [%(name)s] %(message)s")
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     # Ciclo de inicio: NO iniciar inferencia automáticamente
     loop = asyncio.get_running_loop()
     ws_manager.set_loop(loop)
     print("[Main] Servidor iniciado en http://127.0.0.1:8000.")
+    gpu_ok = torch.cuda.is_available()
+    gpu_label = torch.cuda.get_device_name(0) if gpu_ok else "CPU"
+    print(f"[Main] Aceleración de hardware: {'cuda:0' if gpu_ok else 'cpu'} ({gpu_label}) | CUDA FP16: {gpu_ok}")
     print("[Main] Motor de detección en espera. El supervisor debe elegir la fuente de video en la interfaz.")
 
     yield

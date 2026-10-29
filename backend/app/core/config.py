@@ -49,7 +49,7 @@ class Settings:
     ALLOWED_ORIGINS: list = DEFAULT_ALLOWED_ORIGINS
     
     # Límites de subida y extensiones de video
-    MAX_UPLOAD_SIZE_BYTES: int = 200 * 1024 * 1024  # 200 MB
+    MAX_UPLOAD_SIZE_BYTES: int = 3000 * 1024 * 1024  # 3000 MB
     ALLOWED_VIDEO_EXTENSIONS: set = {".mp4", ".avi", ".mkv", ".mov"}
 
     BACKEND_DIR: Path = BACKEND_DIR
@@ -71,7 +71,7 @@ class Settings:
     )
 
     # Tamaño de imagen de entrada para inferencia YOLO (512 equilibra precisión de EPP y ~22+ FPS en CPU)
-    INFERENCE_IMGSZ: int = int(os.getenv("INFERENCE_IMGSZ", "512"))
+    INFERENCE_IMGSZ: int = int(os.getenv("INFERENCE_IMGSZ", "640"))
 
     # Parámetros de captura de video de cámara web en Windows (640x480 maximiza FPS de cámara USB)
     CAMERA_WIDTH: int = int(os.getenv("CAMERA_WIDTH", "1280"))
