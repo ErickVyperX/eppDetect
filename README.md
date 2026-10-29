@@ -50,17 +50,17 @@ flowchart TB
 
     Cam --> Grabber --> Engine
     VideoFile --> Engine
-    Engine -->|Frame Anotado| Routers
-    Engine -->|Infracción Detectada| Cooldown
-    Cooldown -->|Fuera de Cooldown| Pool
+    Engine -->|"Frame Anotado"| Routers
+    Engine -->|"Infracción Detectada"| Cooldown
+    Cooldown -->|"Fuera de Cooldown"| Pool
     Pool --> Storage
     Pool --> DB
     Pool --> WSManager
 
-    Routers -->|Stream MJPEG Multipart| Monitor
-    Routers -->|REST JSON (JWT)| Metrics
-    WSManager -->|Push JSON (/ws/alerts)| Monitor
-    WSManager -->|Disparo de Alerta| Audio
+    Routers -->|"Stream MJPEG Multipart"| Monitor
+    Routers -->|"REST JSON (JWT)"| Metrics
+    WSManager -->|"Push JSON (/ws/alerts)"| Monitor
+    WSManager -->|"Disparo de Alerta"| Audio
 ```
 
 ### Stack Tecnológico
