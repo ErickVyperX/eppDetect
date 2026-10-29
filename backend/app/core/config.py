@@ -49,7 +49,7 @@ class Settings:
     ALLOWED_ORIGINS: list = DEFAULT_ALLOWED_ORIGINS
     
     # Límites de subida y extensiones de video
-    MAX_UPLOAD_SIZE_BYTES: int = 3000 * 1024 * 1024  # 3000 MB
+    MAX_UPLOAD_SIZE_BYTES: int = int(os.getenv("MAX_UPLOAD_SIZE_BYTES", str(3000 * 1024 * 1024)))  # 3000 MB
     ALLOWED_VIDEO_EXTENSIONS: set = {".mp4", ".avi", ".mkv", ".mov"}
 
     BACKEND_DIR: Path = BACKEND_DIR
